@@ -1,0 +1,7 @@
+# Nothing generated belongs in the plugin checkout. Runtime state lives in
+# $XDG_STATE_HOME/omapreflight. These entries exist to catch accidents.
+*.swp
+*~
+.DS_Store
+/reports/
+/checkpoints/

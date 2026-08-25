@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "p134c0d3.omapreflight",
+  "name": "OmaPreflight",
+  "version": "0.1.0",
+  "author": "p134c0d3",
+  "license": "MIT",
+  "description": "Omarchy-aware preflight diagnostics and change intelligence. Establishes a known state before an update, detects high-confidence problems, and explains recovery-relevant differences — locally, read-only, with no telemetry.",
+  "kinds": [
+    "service",
+    "bar-widget",
+    "overlay"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml",
+    "overlay": "Overlay.qml"
+  },
+  "barWidget": {
+    "displayName": "OmaPreflight",
+    "description": "Update readiness at a glance, with a quick panel of category results and a full diagnostic overlay.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

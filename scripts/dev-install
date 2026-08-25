@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Deploy the working tree into the live Omarchy plugin directory and restart the
+# shell.
+#
+# The restart is not optional politeness. Saving under
+# ~/.config/omarchy/plugins/ does make the shell destroy and recreate plugin
+# objects, but `service`-kind QML comes back from a stale component cache: the
+# instance is new, the *code* is not. Verified on Omarchy 4.0.0 / Quickshell
+# 0.3.0 — an edited Service.qml keeps running its previous source until the
+# shell process restarts. Widget/overlay code usually does refresh, but the
+# restart makes the loop deterministic instead of "usually".
+#
+#   scripts/dev-install            deploy + restart
+#   scripts/dev-install --no-restart   deploy only
+
+set -euo pipefail
+
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+PLUGIN_ID="$(jq -r .id "$REPO_ROOT/manifest.json")"
+DEST="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+
+restart=1
+[[ ${1:-} == --no-restart ]] && restart=0
+
+echo "==> Validating before deploy"
+omarchy plugin validate "$REPO_ROOT"
+
+echo "==> Deploying to $DEST"
+mkdir -p "$DEST"
+# Mirror the tree the way a git clone would, minus git internals. Deleting
+# first keeps removed files from lingering in the installed copy.
+find "$DEST" -mindepth 1 -maxdepth 1 -not -name '.git' -exec rm -rf {} +
+tar --exclude=.git -cf - -C "$REPO_ROOT" . | tar -xf - -C "$DEST"
+
+if (( restart )); then
+  echo "==> Restarting omarchy-shell"
+  omarchy restart shell
+  echo "==> Waiting for the shell to answer IPC"
+  for _ in $(seq 1 30); do
+    if [[ "$(omarchy-shell "$PLUGIN_ID" ping 2>/dev/null)" == "ok" ]]; then
+      echo "    plugin is live"
+      exit 0
+    fi
+    sleep 0.5
+  done
+  echo "    plugin did not answer IPC within 15s; check: journalctl --user -e | grep omapreflight" >&2
+  exit 1
+fi
