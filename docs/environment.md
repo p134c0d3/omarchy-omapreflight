@@ -95,6 +95,19 @@ An overlay's `WlrLayershell.namespace` determines whether the compositor blurs
 behind it, and blur rules name first-party namespaces explicitly. See
 [ADR-004](adr/ADR-004-theming-and-layer-legibility.md).
 
+### A bar widget must forward its implicit size
+
+`Bar.qml` sizes each slot from the widget root's implicit size
+(`implicitWidth: activeItem.implicitWidth`). A `qs.Ui.Panel` root whose button is
+anchored with `anchors.fill: parent` therefore reports zero width and renders
+nothing at all — with no warning in the log. Forward it explicitly, as the
+first-party widgets do:
+
+```qml
+implicitWidth: button.implicitWidth
+implicitHeight: button.implicitHeight
+```
+
 ### Overlay placement is single-screen
 
 A bare `PanelWindow` renders on one output and follows focus between monitors.

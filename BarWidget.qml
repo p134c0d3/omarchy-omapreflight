@@ -39,6 +39,13 @@ Panel {
     }
   }
 
+  // The bar sizes each slot from the widget root's implicit size
+  // (Bar.qml: `implicitWidth: activeItem.implicitWidth`). The button is
+  // anchored to fill this root, so without forwarding its implicit size the
+  // slot collapses to zero width and the widget never appears.
+  implicitWidth: button.implicitWidth
+  implicitHeight: button.implicitHeight
+
   readonly property color barIconColor: stateInfo.dim
     ? Qt.darker(barForeground, 1.55)
     : barForeground

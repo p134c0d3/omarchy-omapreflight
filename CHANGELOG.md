@@ -26,3 +26,8 @@ placeholder results.
 - `scripts/dev-install` — deploy and restart the shell, because service QML is
   cached across hot reloads.
 - `docs/environment.md` and ADRs 001 and 004.
+
+### Fixed
+
+- Bar widget rendered nothing because the root did not forward its button's
+  implicit size, so the bar allocated a zero-width slot.
