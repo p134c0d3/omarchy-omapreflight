@@ -44,7 +44,9 @@ enforces the ones a machine can.
   `CommandRunner` / `FileReader`. This is checked structurally.
 - Never evaluate a string as code — no `eval`, no `new Function`, no
   `Qt.createQmlObject`, no `Qt.include`.
-- Never mutate user configuration.
+- Never mutate user configuration. The single exception is the named, runtime,
+  literal Hyprland window rule for the plugin's own window (ADR-005) — it
+  touches no file, and nothing may ever be interpolated into it.
 - Every external process gets a timeout and bounded output.
 - Never mark unverifiable compatibility as safe.
 

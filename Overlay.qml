@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import Quickshell
-import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 import "ui" as Preflight
@@ -10,11 +9,26 @@ import "ui/Vocabulary.js" as Vocabulary
 import "checks/Registry.js" as Registry
 import "core/ResultModel.js" as R
 
-// OmaPreflight full-screen diagnostic overlay — the engineering surface (§7.3).
+// OmaPreflight diagnostic window — the engineering surface (§7.3).
 //
 // Summoned through the host: `omarchy-shell shell toggle p134c0d3.omapreflight`.
 // Because the manifest declares kind `overlay`, the shell's summon path routes
 // here rather than to the bar widget's quick panel.
+//
+// This is a real toplevel (`FloatingWindow`), not a layer-shell surface, and
+// that is a deliberate correction. A layer surface cannot be moved or resized
+// by the compositor: Omarchy binds `SUPER + mouse:272` to move and
+// `SUPER + mouse:273` to resize, both consuming, and both act on *windows*.
+// A layer surface never receives those events and Hyprland has nothing to do
+// with them, so the gesture every other window on the system responds to would
+// simply do nothing here — and re-implementing move and resize inside the
+// surface would be a worse imitation of what the compositor already does well.
+//
+// Being a window also means normal focus, normal blur and opacity rules, and a
+// place in the window list. What it gives up is the modal scrim, which a
+// report you want to read alongside a terminal never wanted anyway.
+//
+// See docs/adr/ADR-005-window-not-layer-surface.md.
 //
 // `service`, `shell` and `manifest` are injected by the shell's panel loader.
 Item {
@@ -59,22 +73,13 @@ Item {
   readonly property color foreground: Color.menu.text
   readonly property color borderColor: Color.menu.border
   readonly property var borderSpec: Border.surfaceSpec("menu", "border", borderColor, Math.max(1, Style.space(2)))
-  readonly property color scrim: Color.menu.scrim
 
-  // Themes make the menu tokens translucent because Omarchy's own surfaces are
-  // blurred by a compositor layer rule — and those rules name first-party
-  // namespaces explicitly, e.g. the current theme allows blur only for
-  // ^(omarchy-bar|omarchy-menu|omarchy-clipboard|...)$. A third-party namespace
-  // gets no blur, so the same token reads as "see-through" instead of
-  // "frosted", with the desktop legible straight through the card.
-  //
-  // Keep the theme's hue and raise only the alpha floor. That looks correct on
-  // any theme with no Hyprland configuration required, and stays correct for
-  // users who do add a blur rule for this namespace (see README).
-  readonly property color cardFill: Qt.rgba(background.r, background.g, background.b,
-                                            Math.max(background.a, 0.97))
-  readonly property color scrimFill: Qt.rgba(scrim.r, scrim.g, scrim.b,
-                                             Math.max(scrim.a, 0.72))
+  // As a window rather than a layer surface, this gets Omarchy's normal window
+  // blur and opacity rules, so the theme's own token is used unmodified. The
+  // alpha floor an earlier layer-shell version needed — because compositor
+  // blur is granted per layer namespace, and only to first-party names — is
+  // gone with the reason for it (ADR-004, superseded by ADR-005).
+  readonly property color surfaceFill: background
   readonly property string fontFamily: Style.font.menuFamily
   readonly property int cornerRadius: Style.cornerRadius
   readonly property int contentMargin: Style.spacing.panelPadding
@@ -84,12 +89,19 @@ Item {
     : ""
 
   function open(payloadJson) {
+    // Idempotent and already registered at service mount; this covers the case
+    // where the compositor restarted underneath a running shell.
+    if (service && typeof service.ensureWindowRule === "function") service.ensureWindowRule(null)
     root.opened = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
+  // Called by the host when it hides us. The flag keeps the window's own
+  // onVisibleChanged from calling straight back into shell.hide().
   function close() {
+    window.closingFromHost = true
     root.opened = false
+    window.closingFromHost = false
   }
 
   // User-initiated dismissal routes through the host so its open-panel state
@@ -204,48 +216,49 @@ Item {
     onTriggered: tick.now = Date.now()
   }
 
-  PanelWindow {
+
+  FloatingWindow {
     id: window
+    title: "OmaPreflight"
     visible: root.opened
-    anchors { top: true; bottom: true; left: true; right: true }
-    color: "transparent"
-    WlrLayershell.namespace: "omapreflight-overlay"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-    exclusionMode: ExclusionMode.Ignore
+    color: root.surfaceFill
 
-    Rectangle {
-      anchors.fill: parent
-      color: root.scrimFill
+    // The window asks to be exactly as tall as its content and no taller, which
+    // is what the user actually wanted from "show everything without
+    // scrolling". Hyprland gets the final say — it always does — so the list
+    // still scrolls if the compositor hands back something shorter.
+    implicitWidth: Style.space(940)
+    implicitHeight: Math.min(Style.space(1200), content.naturalHeight)
+    minimumSize: Qt.size(Style.space(420), Style.space(260))
+
+    // Closing the window with the compositor (or its own close button) has to
+    // tell the host, or the shell keeps believing the panel is open and the
+    // next summon does nothing.
+    property bool closingFromHost: false
+
+    onVisibleChanged: {
+      if (visible) {
+        Qt.callLater(function () { keyCatcher.forceActiveFocus() })
+        return
+      }
+      if (window.closingFromHost) return
+      root.opened = false
+      var id = (root.manifest && root.manifest.id) ? String(root.manifest.id) : "p134c0d3.omapreflight"
+      if (root.shell && typeof root.shell.hide === "function") root.shell.hide(id)
     }
 
-    MouseArea {
+    Item {
+      id: content
       anchors.fill: parent
-      onClicked: root.dismiss()
-    }
+      anchors.margins: root.contentMargin
 
-    BorderSurface {
-      id: card
-      width: Math.min(Style.space(900), window.width - Style.gapsOut * 2)
-      height: Math.min(Style.space(680), window.height - Style.gapsOut * 2)
-      radius: root.cornerRadius
-      anchors.centerIn: parent
-      color: root.cardFill
-      borderSpec: root.borderSpec
-      padding: root.contentMargin
-
-      // Swallow clicks on the card so they do not reach the dismiss scrim.
-      MouseArea { anchors.fill: parent; onClicked: {} }
+      readonly property real naturalHeight: root.contentMargin * 2
+        + header.implicitHeight + footer.implicitHeight
+        + resultsColumn.implicitHeight + Style.space(20)
 
       Item {
         id: keyCatcher
-        // BorderSurface exposes padding as content insets rather than applying
-        // them; consuming them here is what actually indents the content.
         anchors.fill: parent
-        anchors.leftMargin: card.contentLeftInset
-        anchors.rightMargin: card.contentRightInset
-        anchors.topMargin: card.contentTopInset
-        anchors.bottomMargin: card.contentBottomInset
         focus: true
 
         Keys.priority: Keys.BeforeItem
@@ -384,9 +397,9 @@ Item {
             glyphSize: Style.font.displayLarge
           }
 
-          // Progress is shown as a phase name and a count, not only as a bar:
-          // "Hyprland configuration errors — 6 of 9" says something a moving
-          // rectangle does not.
+          // Progress is shown as a phase name and a bar, not only as a bar:
+          // "Hyprland configuration errors" says something a moving rectangle
+          // does not.
           Item {
             width: parent.width
             visible: root.scanRunning
@@ -454,6 +467,7 @@ Item {
             color: Qt.darker(root.foreground, 1.7)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
           }
         }
 
@@ -470,6 +484,7 @@ Item {
           contentWidth: width
           contentHeight: resultsColumn.implicitHeight
           boundsBehavior: Flickable.StopAtBounds
+          // Scrolling exists only for the case the window could not grow into.
           interactive: contentHeight > height
 
           Column {

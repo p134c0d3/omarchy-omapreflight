@@ -26,6 +26,12 @@ It does not update anything, install anything, restore anything, downgrade
 anything, or contact the network. Everything it learns stays on the machine
 until the user chooses to share a report.
 
+There is exactly one thing it does that is not a read — a named, runtime
+Hyprland window rule so its own report window opens floating and centred. It is
+spelled out in full in invariant 11 rather than buried, because a document that
+claims "read-only" and then quietly does something else is worse than one that
+does not make the claim.
+
 ## Trust boundaries
 
 Four kinds of input cross into the plugin. Each is treated as untrusted.
@@ -91,8 +97,9 @@ enumerates every point at which external input reaches a process.
 ### 3. One place starts a process, one place reads a file
 
 `Process` may only be instantiated in `core/CommandJob.qml`. `FileView` may
-only be instantiated in `core/FileReadJob.qml`. Both are checked structurally
-by `scripts/check`, which fails if a second site appears.
+only be instantiated in `core/FileReadJob.qml` (reads) and
+`core/FileWriteJob.qml` (atomic writes). Both rules are checked structurally by
+`scripts/check`, which fails if a site appears anywhere else.
 
 This is what makes the rules above meaningful. A validation routine that can be
 bypassed by declaring a `Process` somewhere else is documentation, not
@@ -166,6 +173,41 @@ The only writable location is
 plugin checkout, nothing under `/usr/share/omarchy` is touched, and no
 configuration file is ever modified — `shell.json` and the Hyprland configs are
 opened read-only.
+
+### 11. One action is not a read, and it is bounded
+
+The diagnostic surface is a real window (ADR-005), which is what makes
+`SUPER`+drag move it like anything else on the desktop. A Wayland client cannot
+ask to be floating, so the service registers a Hyprland window rule once per
+shell session:
+
+```lua
+hl.window_rule({
+  name  = "omapreflight-window",
+  match = { class = "^org.quickshell$", title = "^OmaPreflight$" },
+  float = true, center = true
+})
+```
+
+handed to `hyprctl eval`, because Omarchy configures Hyprland through the Lua
+parser and `hyprctl keyword` refuses to work with it.
+
+Passing a string to another process to evaluate deserves scrutiny, so:
+
+- **the string is a literal.** Nothing from the environment, a file, or another
+  command's output is interpolated into it. There is no input to inject. This
+  is the property that makes it defensible, and it is asserted at the point the
+  string is built in `Service.qml`;
+- **it is scoped** by class *and* title to this plugin's own window;
+- **it is named**, so re-registering replaces the rule rather than accumulating
+  rules;
+- **it is runtime-only** — no file is written, no user configuration is
+  touched, and the rule disappears when the compositor restarts;
+- **it is optional.** If it fails, the window still opens and works, tiled
+  rather than floating, and the reason is logged once.
+
+If a future change ever needs to interpolate a value into that string, it
+should not. Add a check that refuses instead.
 
 ---
 

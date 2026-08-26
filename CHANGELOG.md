@@ -60,6 +60,19 @@ Diagnostic engine (Milestone 1) and the security model.
 
 ### Changed
 
+- **The diagnostic surface is a window, not a full-screen overlay.** It was a
+  layer-shell surface, which cannot be moved or resized: Omarchy binds
+  `SUPER`+drag and `SUPER`+right-drag to window management, both consuming, and
+  a layer surface never receives them. It is now a `FloatingWindow`, so those
+  gestures work natively, it takes normal window blur and opacity, and it can
+  stay open beside a terminal. It sizes itself to its content and scrolls only
+  when the results genuinely do not fit. See
+  [ADR-005](docs/adr/ADR-005-window-not-layer-surface.md).
+- The service registers a named, scoped, runtime Hyprland window rule so that
+  window opens floating and centred — the one thing a Wayland client cannot ask
+  for itself. No file is written and nothing is interpolated into the rule.
+- The alpha floor from ADR-004 is gone with the reason for it: a window gets
+  compositor blur without needing a layer-namespace allowlist entry.
 - Path validation is segment-wise rather than substring-based, so `..config` is
   no longer a false positive and `plugins-evil` no longer satisfies an
   allowlisted `plugins` root.

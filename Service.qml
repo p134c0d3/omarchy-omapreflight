@@ -183,6 +183,59 @@ Item {
     return JSON.stringify(store.results)
   }
 
+  // ---- window rule -----------------------------------------------------
+  //
+  // The diagnostic surface is a real toplevel (ADR-005), which is what makes
+  // SUPER+drag move it and SUPER+right-drag resize it — Omarchy binds those to
+  // window management, and a layer-shell surface can never receive them. What
+  // a Wayland client cannot do is ask to be floating, so the rule that says so
+  // is registered with Hyprland at runtime.
+  //
+  // This is the one thing OmaPreflight does that is not a read. Three things
+  // bound it:
+  //
+  //   * it is scoped by class *and* title to this plugin's own window;
+  //   * it is a named rule, so re-registering replaces rather than accumulates;
+  //   * it is runtime-only. No file is written and no user configuration is
+  //     touched — the rule is gone when the compositor restarts.
+  //
+  // The Lua is a literal. Nothing from the environment, from a file, or from
+  // another command's output is interpolated into it, which is the property
+  // that makes handing a string to `hyprctl eval` defensible at all.
+  //
+  // `hyprctl keyword` would be the obvious alternative and does not work here:
+  // Omarchy configures Hyprland through the Lua parser, and keyword refuses
+  // with "can't work with non-legacy parsers. Use eval." This is also the
+  // approach the b.okomart plugin uses for its own window.
+  readonly property string windowRuleLua: 'hl.window_rule({ name = "omapreflight-window",'
+    + ' match = { class = "^org.quickshell$", title = "^OmaPreflight$" },'
+    + ' float = true, center = true })'
+
+  property bool windowRuleRegistered: false
+  property bool windowRuleReported: false
+
+  function ensureWindowRule(done) {
+    if (windowRuleRegistered) {
+      if (done) done()
+      return
+    }
+    runner.run(["hyprctl", "eval", root.windowRuleLua], { timeoutMs: 4000 }, function (result) {
+      root.windowRuleRegistered = result.ok && String(result.stdout).trim() === "ok"
+      if (!root.windowRuleRegistered && !root.windowRuleReported) {
+        // Said once, not on every open. The window still works without the
+        // rule; it is tiled instead of floating (§31: stay quiet in normal
+        // operation).
+        root.windowRuleReported = true
+        root.log("window rule not registered ("
+          + (result.blocked ? result.blockedReason
+             : (result.startFailed ? "hyprctl unavailable"
+                : String(result.stderr || ("exit " + result.exitCode)).trim()))
+          + "); the report window will be tiled rather than floating")
+      }
+      if (done) done()
+    })
+  }
+
   // ---- quick panel routing ---------------------------------------------
   //
   // One instance of the bar widget exists per screen, so "open the panel" has
@@ -290,6 +343,7 @@ Item {
     // runs, so they would still report the pre-injection fallback.
     root.log("service mounted id=" + String(manifest.id)
       + " version=" + String(manifest.version))
+    root.ensureWindowRule(null)
     initialScan.start()
   }
 

@@ -1,6 +1,19 @@
 # ADR-004 — Theming, and legibility on a non-blurred layer surface
 
-**Status:** Accepted (Milestone 0)
+**Status:** Partially superseded by
+[ADR-005](ADR-005-window-not-layer-surface.md) (Milestone 1)
+
+> The theming half of this decision stands and is unchanged: every colour and
+> metric comes from `Color.*` / `Style.*`, and the repository contains no colour
+> literals.
+>
+> The alpha-floor half is obsolete. It existed because a layer surface only gets
+> compositor blur if a Hyprland layer rule names its namespace, and those rules
+> list first-party namespaces. The diagnostic surface is now a real window
+> (ADR-005), so it gets Omarchy's normal window blur and opacity rules and uses
+> the theme's tokens unmodified. The reasoning below is kept because it is still
+> the correct analysis for any *layer* surface a future version of this plugin
+> might add.
 
 ## Context
 

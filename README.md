@@ -117,20 +117,31 @@ Every colour and metric comes from the active Omarchy theme's tokens
 (`Color.*`, `Style.*`). There are no hard-coded colours and no light/dark
 assumptions — switch themes and the plugin follows.
 
-One caveat worth knowing. Omarchy's own full-screen surfaces are translucent
-because the compositor blurs behind them, and blur is granted by a Hyprland layer
-rule that lists first-party namespaces explicitly. A third-party overlay cannot
-be in that list, so on a theme that makes menus translucent, OmaPreflight raises
-its own alpha floor to stay readable (it never changes the theme's hue, and is
-inert on themes that are already opaque — see
-[ADR-004](docs/adr/ADR-004-theming-and-layer-legibility.md)).
+Status is never carried by colour alone. Every result has a glyph and a word
+(`PASS`, `WARN`, `FAIL`, `UNKNOWN`, `SKIPPED`) before it has a tint, so the
+whole surface stays legible with no colour perception at all.
 
-If you would rather have true frosted glass, allow blur for this namespace in
-`~/.config/hypr/looknfeel.lua`:
+## The report window
 
-```lua
-hl.layer_rule({ match = { namespace = "omapreflight-overlay" }, blur = true, ignore_alpha = 0.06 })
-```
+The full diagnostic surface is a real window, not a full-screen overlay. That
+is deliberate: a layer-shell surface cannot be moved or resized, because
+Omarchy binds `SUPER`+drag and `SUPER`+right-drag to *window* management and a
+layer surface never receives them.
+
+So it behaves like anything else on your desktop:
+
+- `SUPER` + left-drag to move, `SUPER` + right-drag to resize;
+- it opens floating and centred on the focused monitor;
+- it sizes itself to its content, and only scrolls when the results genuinely
+  do not fit on screen;
+- `Esc` closes it, and it can stay open beside a terminal while you act on it.
+
+Floating is the one thing a Wayland client cannot ask for on its own, so the
+plugin registers a Hyprland window rule at runtime — named, scoped to its own
+window by class and title, never written to any file, and gone when the
+compositor restarts. If that fails the window still works; it is tiled instead
+of floating. The reasoning is in
+[ADR-005](docs/adr/ADR-005-window-not-layer-surface.md).
 
 ## What it does on your machine
 
@@ -142,6 +153,7 @@ Stated plainly, because you are running it unsandboxed:
 | **Files read** | `~/.config/omarchy/shell.json`, approved `~/.config/hypr/*.lua` config files (size/hash/mtime only), plugin manifests. It never recursively scans `$HOME`. |
 | **Files written** | Only `${XDG_STATE_HOME:-~/.local/state}/omapreflight/` — state, baseline, and reports you ask for. |
 | **Network** | None. |
+| **Compositor** | One runtime call: a named Hyprland window rule so the report window opens floating and centred. Scoped to this plugin's own window by class and title, never written to a file, gone when the compositor restarts. This is the only thing the plugin does that is not a read. |
 | **Background work** | Runs inside the existing `omarchy-shell` process. No daemon, no second Quickshell instance, no systemd unit, no install hook. |
 | **Privileges** | None. A diagnostic that would need privilege is reported as `SKIPPED — requires privilege`, with the manual command documented. |
 
