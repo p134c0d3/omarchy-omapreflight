@@ -4,134 +4,102 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] — 2026-08-25
 
-Diagnostic engine (Milestone 1) and the security model.
+First release. OmaPreflight answers "what would break if I update?" by asking
+the system 21 questions and reporting the answers, with the evidence attached.
 
-### Added
+It is a read-only diagnostic. It updates nothing, installs nothing, restores
+nothing, and makes no network requests.
 
-- `core/CommandJob.qml` / `core/CommandRunner.qml` — the only place a process
-  starts. argv arrays only; privilege helpers and shell interpreters refused
-  before a process exists; stdout capped at 256 KiB and stderr at 64 KiB while
-  the stream is still arriving; SIGTERM → SIGKILL → abandon escalation so every
-  run reaches a terminal state; execution serialized to one command at a time.
-- `core/FileReadJob.qml` / `core/FileReader.qml` — the only place a file is
-  read, against an explicit directory allowlist with no recursive mode.
-- `core/CheckEngine.qml` — serial execution with per-check watchdogs and a
-  120 s scan ceiling, one result per check however the check misbehaves, no
-  overlapping scans, and readiness `UNKNOWN` for any scan that did not
-  complete. Command and file results are memoized per scan.
-- `core/CapabilityRegistry.qml` — capabilities derived from the CLI's own
-  `omarchy commands --json`. A privileged route is recorded as present but not
-  callable, so `omarchy snapshot` never reads as "snapshots available".
-- `core/ResultModel.js` — status, severity and readiness vocabulary plus the
-  pure readiness aggregator.
-- Nine checks across `environment`, `omarchy` and `hyprland`.
-- Result UI: findings in the quick panel, the full catalog in the overlay
-  grouped by category and sorted worst-first, with expandable evidence and full
-  keyboard navigation.
-- Sanitized Markdown reports (§26), written into the state directory and never
-  uploaded: `core/Sanitizer.js`, `core/ReportBuilder.qml`, `core/FileWriter.qml`
-  with atomic writes, and Save/Copy actions plus `S`/`C` keys in the overlay.
-  The reports directory is created 0700.
-- `cancel`, `results`, `report`, `openPanel`, `closePanel` and `togglePanel` on
-  the service IPC target. The panel methods live on the service, not the
-  widget, because one widget instance exists per screen: the service routes
-  through the shell's own bar resolver, which picks the instance on the focused
-  output instead of whichever copy claimed a target name first.
-- `core/ExecPolicy.js` — the execution and path policy as pure functions, shared
-  by CommandRunner, FileReader and FileWriter so one implementation of the path
-  rules exists rather than three.
-- Test suite: 186 cases across the readiness aggregator, every parser, the
-  sanitizer, the execution policy and the baseline document, run with
-  `scripts/test`. Parser fixtures are real output captured from a live machine.
-- **The full v0.1 check catalog — 21 checks.** Added `hyprland.live-bindings`,
-  `.live-monitors`, `.user-config-presence`; `plugins.discovery`,
-  `.third-party-validation`, `.local-changes`; `runtime.failed-user-units`,
-  `.disk-space-root`, `.disk-space-home`; `recovery.snapshot-capability`,
-  `.baseline-present`, `.version-baseline-match`.
-- Baselines (§19): `core/BaselineStore.qml` and `core/Baseline.js`. Metadata
-  only — versions, fingerprints, hashes, sizes, mtimes, never file contents,
-  and the builder enumerates the permitted fields so that stays true. Written
-  atomically and then read back and parsed before being treated as current.
-  Recorded only when asked, from the report window (`B`) or over IPC.
-- Structured facts: checks record machine-readable values alongside the prose
-  they report, and the baseline is built from those rather than from parsing
-  summary text.
-- `plugins.third-party-validation` now compares the plugin directories on disk
-  against the plugins the shell actually loaded. The shell drops a plugin with
-  an invalid manifest during discovery, warns once into its log, and carries
-  on — so the plugin vanishes from every user-facing surface with no
-  explanation. Validating only the plugins the CLI reports could never find it:
-  everything on that list has already passed the same validator.
-- `docs/check-catalog.md`, `docs/privacy.md`, `docs/architecture.md`, ADR-002
-  (serial execution and bounded work) and ADR-003 (QML does I/O, JavaScript
-  makes the decisions). `scripts/check` fails if the documented catalog and the
-  code disagree in either direction.
-- `scripts/demo`, which injects one genuinely broken plugin so the FAIL and
-  WARN paths can be seen for real, and `scripts/demo --clean` to remove it.
-  There is no demo mode inside the plugin and no way to make it report
-  something it did not observe.
-- `runtime.disk-space-*` is the catalog's second blocker: below 2 GiB free is a
-  genuine "do not update", because an update that runs out of space part-way is
-  the most reliable way to end up with a broken system. Thresholds are fixed
-  and documented, and explicitly not a prediction of what an update needs.
-- `docs/security.md` — threat model, trust boundaries, the enforced invariants
-  with their CWE mapping, and the residual risks that are *not* mitigated.
-- `SECURITY.md` — private vulnerability reporting and scope.
-- Argument-injection defence (CWE-88): externally-sourced argv elements are
-  declared via `dataArgs` and validated — no leading dash, no control
-  characters, and paths must be absolute, free of `..` segments, and inside a
-  declared root matched on a segment boundary.
-- `scripts/check` gained structural invariants (`Process` only in
-  `core/CommandJob.qml`, `FileView` only in `core/FileReadJob.qml`), a
-  dynamic-code guard, a detached-process guard, and a `--portable` mode.
-- GitHub Actions workflow running the portable checks on every push and pull
-  request.
+### The product
 
-### Changed
+- **21 checks** across environment, Omarchy, Hyprland, plugins, runtime and
+  recovery. Each one names what it ran, what it found, and what to do about it.
+  The full list is in [docs/check-catalog.md](docs/check-catalog.md).
+- **A finite readiness vocabulary** — READY, REVIEW, NOT RECOMMENDED, UNKNOWN.
+  No score, no percentage, and no verdict at all from a scan that did not
+  finish.
+- **UNKNOWN is a real answer.** A check that could not establish something says
+  so instead of passing. A missing capability is SKIPPED with the reason.
+- **Two surfaces.** A bar badge with a quick panel showing the verdict and what
+  needs attention, and a report window with the full catalog, expandable
+  evidence, and full keyboard navigation.
+- **Diagnostic reports** — sanitized Markdown, written locally or copied to the
+  clipboard, never uploaded, and stamped with a line telling you to review it
+  before posting.
+- **Baselines** — record the current state, and a later scan says exactly what
+  changed: versions, config file hashes, plugin commits. Metadata only, never
+  file contents. Recorded only when you ask.
 
-- **The diagnostic surface is a window, not a full-screen overlay.** It was a
-  layer-shell surface, which cannot be moved or resized: Omarchy binds
-  `SUPER`+drag and `SUPER`+right-drag to window management, both consuming, and
-  a layer surface never receives them. It is now a `FloatingWindow`, so those
-  gestures work natively, it takes normal window blur and opacity, and it can
-  stay open beside a terminal. It sizes itself to its content and scrolls only
-  when the results genuinely do not fit. See
-  [ADR-005](docs/adr/ADR-005-window-not-layer-surface.md).
-- The service registers a named, scoped, runtime Hyprland window rule so that
-  window opens floating and centred — the one thing a Wayland client cannot ask
-  for itself. No file is written and nothing is interpolated into the rule.
-- The alpha floor from ADR-004 is gone with the reason for it: a window gets
-  compositor blur without needing a layer-namespace allowlist entry.
-- Path validation is segment-wise rather than substring-based, so `..config` is
-  no longer a false positive and `plugins-evil` no longer satisfies an
-  allowlisted `plugins` root.
+### Notable behaviour
 
-## [0.1.0] — 2026-08-24
+- The report window is a real toplevel, so `SUPER`+drag moves it and
+  `SUPER`+right-drag resizes it like anything else on the desktop. It opens
+  floating and centred, sizes itself to its content, and scrolls only when the
+  results genuinely do not fit
+  ([ADR-005](docs/adr/ADR-005-window-not-layer-surface.md)).
+- `plugins.third-party-validation` compares the plugin directories on disk
+  against what the shell actually loaded. The shell drops a plugin with an
+  invalid manifest during discovery, warns once into its log, and carries on —
+  so the plugin vanishes from every menu with no explanation. This is the check
+  most likely to tell you something you did not know.
+- `recovery.snapshot-capability` reports that snapshots *look possible* and
+  never that they are available. `omarchy snapshot` requires privilege, so the
+  plugin can see the mechanism and can never exercise it.
+- Status is carried by a glyph and a word before it is carried by colour, and
+  every colour is a theme token. The repository contains no colour literals.
 
-Runtime foundation (Milestone 0). The plugin loads and its surfaces work; the
-diagnostic engine is not implemented yet and the UI says so rather than showing
-placeholder results.
+### Safety
 
-### Added
+The plugin runs unsandboxed inside the shell that draws your desktop. The
+limits it operates under are written down in
+[docs/security.md](docs/security.md), mapped to the weaknesses they address,
+and enforced by `scripts/check`:
 
-- Multi-kind plugin manifest declaring `service`, `bar-widget` and `overlay`.
-- `Service.qml` — the single mounted instance that owns shared state, plus the
-  `p134c0d3.omapreflight` IPC target with `ping`, `status` and `run`.
-- `core/PreflightStore.qml` — reactive state with a finite readiness vocabulary
-  and no numeric scoring.
-- `BarWidget.qml` — readiness badge and quick panel, built on `qs.Ui.Panel`.
-  Status is carried by glyph and label, never by colour alone.
-- `Overlay.qml` — full-screen diagnostic surface with keyboard focus and `Esc`
-  to close.
-- `scripts/check` — manifest validation, `qmllint` with the `qs` import shim, and
-  safety-invariant greps.
-- `scripts/dev-install` — deploy and restart the shell, because service QML is
-  cached across hot reloads.
-- `docs/environment.md` and ADRs 001 and 004.
+- commands are argv arrays; there is no shell anywhere in the plugin;
+- externally-sourced arguments are declared and validated — no leading dash, no
+  control characters, and paths must be absolute, traversal-free and inside an
+  explicit root;
+- exactly one file may start a process, and two may touch a file, checked
+  structurally so the validation cannot be routed around;
+- no privilege, ever; no network; no dynamic code;
+- every command is capped and timed out, every check has a watchdog, the whole
+  scan has a 120 s ceiling, and one command runs at a time
+  ([ADR-002](docs/adr/ADR-002-serial-execution-and-bounded-work.md));
+- the only writable location is
+  `${XDG_STATE_HOME:-~/.local/state}/omapreflight/`, created `0700`.
 
-### Fixed
+The single action that is not a read — a named, runtime, literal Hyprland
+window rule for the plugin's own window — is documented in full rather than
+footnoted.
 
-- Bar widget rendered nothing because the root did not forward its button's
-  implicit size, so the bar allocated a zero-width slot.
+### Engineering
+
+- **Decisions live in pure JavaScript; QML owns I/O and lifetime**
+  ([ADR-003](docs/adr/ADR-003-pure-javascript-for-decisions.md)). 186 tests run
+  in under half a second with no compositor, no shell and no display, over the
+  readiness aggregator, every parser, the sanitizer, the execution policy and
+  the baseline document. Parser fixtures are real output captured from a live
+  machine.
+- **The service is the shared state, not a QML singleton**
+  ([ADR-001](docs/adr/ADR-001-shared-state.md)) — singletons survive
+  `Qt.clearComponentCache()` on plugin reload and would carry stale state and
+  live timers across it.
+- `scripts/check` validates the manifest, lints the QML, asserts the security
+  invariants, and fails if the documented check catalog and the code disagree
+  in either direction. `scripts/check --portable` and `scripts/test` run in CI.
+- Seven corrections to the engineering spec, each found by verifying against
+  the installed system rather than trusting the document, are recorded in
+  [docs/environment.md](docs/environment.md).
+
+### Known limitations
+
+- Tested on Omarchy 4.0.1 / Quickshell 0.3.1 / Hyprland 0.56.2. Both Omarchy
+  and Quickshell moved underneath this project while it was being built, which
+  is why the plugin discovers rather than assumes.
+- The report window opens on one output. Mirroring across monitors is not
+  implemented.
+- Sanitization is pattern matching and cannot be complete. Every report says so.
+- Postflight ("what actually changed after the update?") and semantic
+  configuration connectivity are deliberately out of scope for v0.1.
