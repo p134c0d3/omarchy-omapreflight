@@ -10,10 +10,16 @@ telemetry and no automatic fixes.
 It does not replace `omarchy update`, snapshots, or your package manager. It is
 the evidence layer around them.
 
-> **Status: 0.1.0 — runtime foundation.** The plugin loads, mounts its service,
-> renders its bar widget, and opens its overlay. The diagnostic engine and check
-> catalogue land in the next milestones. It reports honestly that no checks have
-> run rather than showing placeholder results.
+![The OmaPreflight report window: 21 checks across six categories, worst-first, with a REVIEW verdict](preview.png)
+
+*More in [screenshots/](screenshots/) — including a failing check expanded to
+its evidence, and the bar widget's quick panel. Every colour is a theme token,
+so it will look like whatever theme you have applied.*
+
+> **Status: 0.1.0.** Twenty-one checks across environment, Omarchy, Hyprland,
+> plugins, runtime and recovery; sanitized reports; baselines. Verified on
+> Omarchy 4.0.1 / Quickshell 0.3.1 / Hyprland 0.56.2. See the
+> [changelog](CHANGELOG.md) for what is in it and what is deliberately not.
 
 ## Design principles
 
