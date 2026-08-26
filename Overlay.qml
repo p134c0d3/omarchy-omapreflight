@@ -1,8 +1,14 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
+import "ui" as Preflight
+import "ui/Vocabulary.js" as Vocabulary
+import "checks/Registry.js" as Registry
+import "core/ResultModel.js" as R
 
 // OmaPreflight full-screen diagnostic overlay — the engineering surface (§7.3).
 //
@@ -23,6 +29,29 @@ Item {
   readonly property var store: service ? service.store : null
   readonly property string pluginVersion: service ? String(service.pluginVersion) : ""
   readonly property string readiness: store ? String(store.readiness) : "neutral"
+  readonly property bool scanRunning: store ? store.scanRunning === true : false
+  readonly property var results: store && store.results ? store.results : []
+  readonly property var counts: store ? store.countsByStatus() : null
+
+  // Category order first (the catalog's own reading order), then worst-first
+  // inside each category. A diagnostic surface should put the thing that needs
+  // attention where the eye lands.
+  readonly property var orderedResults: {
+    var list = root.results.slice()
+    list.sort(function (a, b) {
+      var byCategory = Registry.categoryOrder(a.category) - Registry.categoryOrder(b.category)
+      if (byCategory !== 0) return byCategory
+      var byStatus = R.statusRank(a.status) - R.statusRank(b.status)
+      if (byStatus !== 0) return byStatus
+      return String(a.id).localeCompare(String(b.id))
+    })
+    return list
+  }
+
+  // Expansion is keyed by check id rather than by row index so it survives a
+  // rescan reordering the list.
+  property var expandedIds: ({})
+  property int selectedIndex: 0
 
   // Shares the [menu] surface tokens so themes style this like every other
   // Omarchy surface. No hard-coded light/dark assumptions (§27.1).
@@ -50,15 +79,9 @@ Item {
   readonly property int cornerRadius: Style.cornerRadius
   readonly property int contentMargin: Style.spacing.panelPadding
 
-  readonly property string readinessLabel: {
-    switch (readiness) {
-      case "ready":           return "READY"
-      case "review":          return "REVIEW"
-      case "not_recommended": return "NOT RECOMMENDED"
-      case "unknown":         return "UNKNOWN"
-      default:                return "NO SCAN YET"
-    }
-  }
+  readonly property string lastScanText: store && store.lastScanAt
+    ? "scanned " + Vocabulary.relativeTime(store.lastScanAt, tick.now)
+    : ""
 
   function open(payloadJson) {
     root.opened = true
@@ -80,6 +103,67 @@ Item {
   function toggle() {
     if (root.opened) root.dismiss()
     else root.open("{}")
+  }
+
+  function runScan() {
+    if (service && typeof service.runPreflight === "function") service.runPreflight()
+  }
+
+  function cancelScan() {
+    if (service && typeof service.cancelPreflight === "function") service.cancelPreflight()
+  }
+
+  function isExpanded(id) {
+    return root.expandedIds[String(id)] === true
+  }
+
+  function toggleExpanded(id) {
+    var key = String(id)
+    // Reassigned rather than mutated: a var property only notifies on
+    // assignment, and the rows bind to it.
+    var next = {}
+    for (var existing in root.expandedIds) next[existing] = root.expandedIds[existing]
+    if (next[key]) delete next[key]
+    else next[key] = true
+    root.expandedIds = next
+  }
+
+  function moveSelection(delta) {
+    var count = root.orderedResults.length
+    if (count === 0) return
+    var next = root.selectedIndex + delta
+    if (next < 0) next = 0
+    if (next > count - 1) next = count - 1
+    root.selectedIndex = next
+    root.ensureVisible(next)
+  }
+
+  function ensureVisible(index) {
+    var item = rowRepeater.itemAt(index)
+    if (!item) return
+    var top = item.y
+    var bottom = item.y + item.height
+    if (top < listView.contentY) listView.contentY = Math.max(0, top - Style.space(8))
+    else if (bottom > listView.contentY + listView.height)
+      listView.contentY = Math.min(Math.max(0, listView.contentHeight - listView.height),
+                                   bottom - listView.height + Style.space(8))
+  }
+
+  function activateSelected() {
+    var result = root.orderedResults[root.selectedIndex]
+    if (result) root.toggleExpanded(result.id)
+  }
+
+  // Only ticks while the overlay is open, and only once a minute: it exists to
+  // keep "scanned 3 minutes ago" honest, not to animate anything.
+  Timer {
+    id: tick
+    property real now: Date.now()
+    interval: 60000
+    repeat: true
+    running: root.opened
+    triggeredOnStart: true
+    onTriggered: tick.now = Date.now()
   }
 
   PanelWindow {
@@ -105,7 +189,7 @@ Item {
     BorderSurface {
       id: card
       width: Math.min(Style.space(900), window.width - Style.gapsOut * 2)
-      height: Math.min(Style.space(620), window.height - Style.gapsOut * 2)
+      height: Math.min(Style.space(680), window.height - Style.gapsOut * 2)
       radius: root.cornerRadius
       anchors.centerIn: parent
       color: root.cardFill
@@ -128,21 +212,55 @@ Item {
 
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
-          if (event.key === Qt.Key_Escape) {
+          switch (event.key) {
+          case Qt.Key_Escape:
             root.dismiss()
             event.accepted = true
+            break
+          case Qt.Key_Down:
+          case Qt.Key_J:
+            root.moveSelection(1)
+            event.accepted = true
+            break
+          case Qt.Key_Up:
+          case Qt.Key_K:
+            root.moveSelection(-1)
+            event.accepted = true
+            break
+          case Qt.Key_Home:
+            root.selectedIndex = 0
+            root.ensureVisible(0)
+            event.accepted = true
+            break
+          case Qt.Key_End:
+            root.selectedIndex = Math.max(0, root.orderedResults.length - 1)
+            root.ensureVisible(root.selectedIndex)
+            event.accepted = true
+            break
+          case Qt.Key_Return:
+          case Qt.Key_Enter:
+          case Qt.Key_Space:
+            root.activateSelected()
+            event.accepted = true
+            break
+          case Qt.Key_R:
+            if (!root.scanRunning) root.runScan()
+            event.accepted = true
+            break
           }
         }
 
+        // ---- header -------------------------------------------------
         Column {
+          id: header
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.top: parent.top
-          spacing: Style.space(16)
+          spacing: Style.space(14)
 
           Item {
             width: parent.width
-            implicitHeight: Math.max(title.implicitHeight, badge.implicitHeight)
+            implicitHeight: Math.max(title.implicitHeight, actions.implicitHeight)
 
             Column {
               id: title
@@ -166,40 +284,166 @@ Item {
               }
             }
 
-            Text {
-              id: badge
-              text: root.readinessLabel
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.title
-              font.bold: true
-              font.letterSpacing: 1.4
+            Row {
+              id: actions
+              spacing: Style.space(10)
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
+
+              Button {
+                text: root.scanRunning ? "Cancel" : "Run scan"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                bordered: true
+                focusable: true
+                onClicked: root.scanRunning ? root.cancelScan() : root.runScan()
+              }
             }
           }
 
           PanelSeparator { width: parent.width }
 
-          // The result list, category navigation, evidence blocks and report
-          // actions land here in M1/M2. Until the check engine exists this
-          // surface states what it knows rather than implying a scan ran.
-          Text {
-            text: "No checks have run yet.\n\nThe diagnostic engine arrives in the next milestone. "
-                + "This surface is the runtime spike: it proves the overlay mounts, summons, "
-                + "takes keyboard focus, and closes cleanly."
-            color: Qt.darker(root.foreground, 1.35)
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-            wrapMode: Text.WordWrap
+          Preflight.ReadinessBadge {
             width: parent.width
+            readiness: root.readiness
+            scanning: root.scanRunning
+            counts: root.counts
+            lastScanText: root.lastScanText
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            glyphSize: Style.font.displayLarge
           }
 
-          Text {
-            text: "Esc  close"
-            color: Qt.darker(root.foreground, 1.7)
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
+          // Progress is shown as a phase name and a count, not only as a bar:
+          // "Hyprland configuration errors — 6 of 9" says something a moving
+          // rectangle does not.
+          Item {
+            width: parent.width
+            visible: root.scanRunning
+            implicitHeight: visible ? progressLabel.implicitHeight + Style.space(10) : 0
+
+            Text {
+              id: progressLabel
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              text: root.store && root.store.scanPhase
+                ? root.store.scanPhase
+                : "Starting"
+              color: Qt.darker(root.foreground, 1.4)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+
+            Rectangle {
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: progressLabel.bottom
+              anchors.topMargin: Style.space(6)
+              height: Math.max(2, Style.space(3))
+              radius: height / 2
+              color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15)
+
+              Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: parent.width * Math.max(0, Math.min(1, root.store ? root.store.scanProgress : 0))
+                radius: parent.radius
+                color: root.foreground
+                Behavior on width { NumberAnimation { duration: 160 } }
+              }
+            }
+          }
+
+          PanelSeparator { width: parent.width }
+        }
+
+        // ---- footer -------------------------------------------------
+        Text {
+          id: footer
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          text: "↑↓ move   ⏎ expand   R rescan   Esc close"
+          color: Qt.darker(root.foreground, 1.7)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+
+        // ---- results ------------------------------------------------
+        Flickable {
+          id: listView
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: header.bottom
+          anchors.bottom: footer.top
+          anchors.topMargin: Style.space(10)
+          anchors.bottomMargin: Style.space(10)
+          clip: true
+          contentWidth: width
+          contentHeight: resultsColumn.implicitHeight
+          boundsBehavior: Flickable.StopAtBounds
+          interactive: contentHeight > height
+
+          Column {
+            id: resultsColumn
+            width: listView.width
+            spacing: Style.space(2)
+
+            // States what it knows. An empty list is never dressed up as a
+            // clean bill of health (§3.2).
+            Text {
+              visible: root.orderedResults.length === 0
+              width: parent.width
+              text: root.scanRunning
+                ? "Running the first checks…"
+                : "No checks have run yet. Press R, or use the Run scan button."
+              color: Qt.darker(root.foreground, 1.4)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              wrapMode: Text.WordWrap
+            }
+
+            Repeater {
+              id: rowRepeater
+              model: root.orderedResults
+
+              delegate: Column {
+                id: rowGroup
+                required property int index
+                required property var modelData
+
+                width: resultsColumn.width
+                spacing: Style.space(4)
+
+                readonly property bool startsCategory: index === 0
+                  || String(root.orderedResults[index - 1].category) !== String(modelData.category)
+
+                PanelSectionHeader {
+                  visible: rowGroup.startsCategory
+                  height: visible ? implicitHeight + Style.space(10) : 0
+                  text: Registry.categoryTitle(rowGroup.modelData.category).toUpperCase()
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  verticalAlignment: Text.AlignBottom
+                }
+
+                Preflight.CheckRow {
+                  width: rowGroup.width
+                  result: rowGroup.modelData
+                  expanded: root.isExpanded(rowGroup.modelData.id)
+                  selected: root.selectedIndex === rowGroup.index
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  onActivated: {
+                    root.selectedIndex = rowGroup.index
+                    root.toggleExpanded(rowGroup.modelData.id)
+                  }
+                }
+              }
+            }
           }
         }
       }

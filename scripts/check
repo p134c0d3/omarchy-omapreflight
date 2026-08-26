@@ -65,10 +65,13 @@ while IFS= read -r f; do scan_paths+=("$f"); done < <(
   find "$REPO_ROOT" \( -name '*.qml' -o -name '*.js' \) -not -path '*/.git/*' -not -path '*/tests/*'
 )
 if (( ${#scan_paths[@]} > 0 )); then
-  if grep -nE '(^|[^A-Za-z_])sudo[^A-Za-z_]' "${scan_paths[@]}"; then
+  # The one legitimate mention is CommandRunner's refusal list, which is why
+  # those lines carry an explicit marker comment. Everything else is a defect.
+  if grep -nE '(^|[^A-Za-z_])sudo[^A-Za-z_]' "${scan_paths[@]}" \
+       | grep -v 'privilege-escalation denylist'; then
     fail "sudo referenced in plugin code (spec §33.1)"
   else
-    pass "no sudo"
+    pass "no sudo outside the refusal list"
   fi
 
   if grep -nE '"(sh|bash)"[[:space:]]*,[[:space:]]*"-c"' "${scan_paths[@]}"; then

@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "core" as Core
+import "checks/Registry.js" as Registry
 
 // OmaPreflight service — the single long-lived object the shell mounts for this
 // plugin. `shell.qml:_syncServices()` mounts exactly one instance per plugin id
@@ -32,10 +33,51 @@ Item {
     pluginVersion: root.pluginVersion
   }
 
-  // ---- state paths (spec §14.1) ---------------------------------------
+  // ---- paths (spec §14.1) ---------------------------------------------
   readonly property string homeDir: Quickshell.env("HOME") || ""
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || (homeDir + "/.local/state")
   readonly property string stateDir: stateHome + "/omapreflight"
+  readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || (homeDir + "/.config")
+
+  readonly property var paths: ({
+    home: root.homeDir,
+    stateDir: root.stateDir,
+    configDir: root.configHome,
+    omarchyConfigDir: root.configHome + "/omarchy",
+    shellConfig: root.configHome + "/omarchy/shell.json",
+    pluginsDir: root.configHome + "/omarchy/plugins",
+    hyprConfigDir: root.configHome + "/hypr"
+  })
+
+  // ---- engine ---------------------------------------------------------
+  property Core.CommandRunner runner: Core.CommandRunner {}
+
+  property Core.FileReader fileReader: Core.FileReader {
+    // The complete set of directories OmaPreflight will read from. There is no
+    // recursive mode and no way for a check to widen this (§24, §33.6).
+    allowedPrefixes: [
+      root.configHome + "/omarchy/",
+      root.configHome + "/hypr/",
+      root.stateDir + "/"
+    ]
+  }
+
+  property Core.CapabilityRegistry capabilities: Core.CapabilityRegistry {}
+
+  property Core.CheckEngine engine: Core.CheckEngine {
+    runner: root.runner
+    fileReader: root.fileReader
+    capabilities: root.capabilities
+    store: root.store
+    paths: root.paths
+    checks: Registry.all()
+
+    onFinished: function (completed, results) {
+      root.log("scan " + (completed ? "completed" : "did not complete")
+        + " readiness=" + root.store.readiness
+        + " checks=" + results.length)
+    }
+  }
 
   function log(message) {
     console.log("[omapreflight] " + message)
@@ -43,15 +85,24 @@ Item {
 
   // ---- public API (also the IPC surface, spec §32) ---------------------
 
-  // Run the full deterministic check suite. Wired to the CheckEngine in M1;
-  // until then it reports honestly rather than faking a result.
+  // Run the full deterministic check suite. Returns the scan id, or "busy" if
+  // one is already running — scans never overlap (§9.5).
   function runPreflight() {
-    if (store.scanRunning) return "busy"
-    return "not-implemented"
+    return String(engine.start("manual"))
+  }
+
+  function cancelPreflight() {
+    if (!store.scanRunning) return "idle"
+    engine.cancel("Scan cancelled.")
+    return "cancelled"
   }
 
   function statusJson() {
     return JSON.stringify(store.summary())
+  }
+
+  function resultsJson() {
+    return JSON.stringify(store.results)
   }
 
   IpcHandler {
@@ -71,6 +122,31 @@ Item {
     function run(): string {
       return root.runPreflight()
     }
+
+    function cancel(): string {
+      return root.cancelPreflight()
+    }
+
+    function results(): string {
+      return root.resultsJson()
+    }
+  }
+
+  // The first scan is automatic but deliberately late: the shell has a bar to
+  // draw and plugins to mount when it starts, and a diagnostic tool should not
+  // be competing for that. Nothing about it is privileged or destructive, so
+  // running it unprompted is safe (§13: trigger initial lightweight scan).
+  property bool autoScanOnStart: true
+
+  Timer {
+    id: initialScan
+    interval: 5000
+    repeat: false
+    running: false
+    onTriggered: {
+      if (!root.autoScanOnStart) return
+      root.runPreflight()
+    }
   }
 
   // The shell creates the object first and injects `manifest`/`shell` after
@@ -89,9 +165,13 @@ Item {
     // runs, so they would still report the pre-injection fallback.
     root.log("service mounted id=" + String(manifest.id)
       + " version=" + String(manifest.version))
+    initialScan.start()
   }
 
   Component.onDestruction: {
+    // Stop anything in flight so a reload cannot leave an orphaned process
+    // writing into a store that is about to be destroyed (§9.5).
+    if (root.store.scanRunning) root.engine.cancel("Plugin unloaded.")
     root.log("service unmounted id=" + root.pluginId)
   }
 }
