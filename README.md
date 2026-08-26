@@ -54,12 +54,50 @@ The widget lands in the right bar section. Move it with:
 omarchy bar move p134c0d3.omapreflight --section center
 ```
 
+### Requirements
+
+Omarchy, and the tools a stock Omarchy install already has. OmaPreflight bundles
+nothing and installs nothing.
+
+| Needed | Used for |
+|---|---|
+| `omarchy` | version, channel, plugin inventory and validation |
+| `hyprctl` | config errors, bindings, monitors |
+| `systemctl` | failed user services |
+| `pacman` | the Quickshell version |
+| `git` | local status inside plugin checkouts — never a fetch |
+| `df`, `find`, `stat`, `sha256sum`, `findmnt`, `mkdir` | free space, config metadata, plugin directories |
+
+Anything missing degrades one check to `SKIPPED` or `UNKNOWN` with the reason
+shown. Nothing here is a hard dependency, and there are no bundled binaries and
+no build step.
+
 ## Update
 
 ```bash
 omarchy plugin update p134c0d3.omapreflight
 omarchy plugin update --all
 ```
+
+## Remove
+
+```bash
+omarchy plugin disable p134c0d3.omapreflight   # keep it installed, stop loading it
+omarchy plugin remove p134c0d3.omapreflight    # remove it entirely
+```
+
+Removal takes the plugin out of `~/.config/omarchy/plugins/` and unloads it from
+the running shell. It leaves nothing behind in your Omarchy or Hyprland
+configuration, because it never wrote anything there.
+
+Two things it created for itself are yours to delete if you want them gone:
+
+```bash
+rm -rf ~/.local/state/omapreflight    # baseline and saved reports
+```
+
+and the Hyprland window rule for its own report window, which is registered at
+runtime and disappears on its own the next time the compositor restarts.
 
 ## Use
 
