@@ -1,0 +1,29 @@
+name: check
+
+# CI cannot install Omarchy or Quickshell, so it runs the portable subset:
+# manifest sanity, the security invariants from docs/security.md, and the
+# structural single-entry-point checks. The full run — `scripts/check` with
+# `omarchy plugin validate` and qmllint — happens on a real Omarchy machine
+# before a release is tagged.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Manifest, safety invariants, structure
+        run: ./scripts/check --portable

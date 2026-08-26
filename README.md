@@ -123,14 +123,35 @@ Stated plainly, because you are running it unsandboxed:
 | **Background work** | Runs inside the existing `omarchy-shell` process. No daemon, no second Quickshell instance, no systemd unit, no install hook. |
 | **Privileges** | None. A diagnostic that would need privilege is reported as `SKIPPED — requires privilege`, with the manual command documented. |
 
+### How the limits are enforced
+
+Those are not promises, they are invariants with enforcement behind them:
+
+- commands are argv arrays and there is no shell anywhere in the plugin, so
+  there is nothing to quote and no injection to get wrong;
+- any argument that came from outside the plugin — a plugin id, a directory
+  name — is declared as data and validated: no leading dash (which is all
+  argument injection needs), no control characters, and paths must be absolute,
+  traversal-free, and inside an explicit root;
+- exactly one file may start a process and exactly one may read a file, so the
+  validation cannot be routed around;
+- every command has a timeout and capped output, every check has a watchdog,
+  and the whole scan has a ceiling.
+
+`scripts/check` fails the build if any of that regresses. The reasoning, the
+CWE mapping, and an honest list of what is *not* mitigated are in
+[docs/security.md](docs/security.md). To report a vulnerability, see
+[SECURITY.md](SECURITY.md).
+
 See [docs/privacy.md](docs/privacy.md) once the engine lands for the full data
 model.
 
 ## Development
 
 ```bash
-scripts/check         # manifest validation + qmllint + safety invariants
-scripts/dev-install   # deploy to ~/.config/omarchy/plugins and restart the shell
+scripts/check              # manifest validation + qmllint + security invariants
+scripts/check --portable   # the subset that runs without Omarchy; this is CI
+scripts/dev-install        # deploy to ~/.config/omarchy/plugins, restart the shell
 ```
 
 `dev-install` restarts the shell deliberately: `service`-kind QML is served from

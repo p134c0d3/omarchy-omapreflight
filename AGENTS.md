@@ -1,8 +1,9 @@
 # Working on OmaPreflight
 
 Read `OmaPreflight_ENGINEERING_SPEC.md` (the design spec this project is built
-from) before changing code, and `docs/environment.md` before trusting any
-remembered Omarchy or Quickshell API.
+from) before changing code, `docs/environment.md` before trusting any
+remembered Omarchy or Quickshell API, and `docs/security.md` before touching
+anything that runs a command or reads a file.
 
 ## Source of truth
 
@@ -21,6 +22,10 @@ is recorded as an ADR in `docs/adr/`.
 
 ## Hard rules
 
+The plugin runs unsandboxed inside the user's shell process. `docs/security.md`
+is the reasoning; these are the rules that fall out of it, and `scripts/check`
+enforces the ones a machine can.
+
 - Never call `sudo`. A check needing privilege returns `SKIPPED — requires
   privilege` and documents the manual command.
 - Never create a second Quickshell process.
@@ -30,6 +35,15 @@ is recorded as an ADR in `docs/adr/`.
 - Never write outside `${XDG_STATE_HOME:-~/.local/state}/omapreflight/`.
 - Never build a command with `sh -c` or interpolate values into shell text. Pass
   argument arrays.
+- **Never pass an externally-sourced value as an argument without declaring it.**
+  Anything read from command output, a file, or a directory listing goes in
+  `dataArgs`, with `allowedRoots` when it is a path. A value that starts with
+  `-` becomes an option, and that is all argument injection needs.
+- **`Process` is only ever instantiated in `core/CommandJob.qml`, and `FileView`
+  only in `core/FileReadJob.qml`.** Everything else goes through
+  `CommandRunner` / `FileReader`. This is checked structurally.
+- Never evaluate a string as code — no `eval`, no `new Function`, no
+  `Qt.createQmlObject`, no `Qt.include`.
 - Never mutate user configuration.
 - Every external process gets a timeout and bounded output.
 - Never mark unverifiable compatibility as safe.
@@ -49,7 +63,8 @@ is recorded as an ADR in `docs/adr/`.
 ## Before claiming a task is done
 
 1. Restate the acceptance criterion being implemented.
-2. `scripts/check` passes (manifest validation, qmllint, safety greps).
+2. `scripts/check` passes (manifest validation, qmllint, safety and structural
+   invariants). `scripts/check --portable` is what CI runs.
 3. `scripts/dev-install` and exercise the change in the running shell.
 4. Say what remains unknown.
 
@@ -61,3 +76,7 @@ Stable id, category, user-facing title, declared capability requirements,
 deterministic runner, timeout, parser, correct `PASS`/`WARN`/`FAIL`/`UNKNOWN`/
 `SKIPPED` behaviour, evidence, remediation text where useful, fixtures for
 success / failure / malformed input, and a privacy review.
+
+If the check runs a command with any argument it did not author, the review
+also covers the `dataArgs` declaration and its `allowedRoots` — see the review
+questions at the end of `docs/security.md`.

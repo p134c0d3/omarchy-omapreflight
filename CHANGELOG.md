@@ -4,6 +4,54 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Diagnostic engine (Milestone 1) and the security model.
+
+### Added
+
+- `core/CommandJob.qml` / `core/CommandRunner.qml` — the only place a process
+  starts. argv arrays only; privilege helpers and shell interpreters refused
+  before a process exists; stdout capped at 256 KiB and stderr at 64 KiB while
+  the stream is still arriving; SIGTERM → SIGKILL → abandon escalation so every
+  run reaches a terminal state; execution serialized to one command at a time.
+- `core/FileReadJob.qml` / `core/FileReader.qml` — the only place a file is
+  read, against an explicit directory allowlist with no recursive mode.
+- `core/CheckEngine.qml` — serial execution with per-check watchdogs and a
+  120 s scan ceiling, one result per check however the check misbehaves, no
+  overlapping scans, and readiness `UNKNOWN` for any scan that did not
+  complete. Command and file results are memoized per scan.
+- `core/CapabilityRegistry.qml` — capabilities derived from the CLI's own
+  `omarchy commands --json`. A privileged route is recorded as present but not
+  callable, so `omarchy snapshot` never reads as "snapshots available".
+- `core/ResultModel.js` — status, severity and readiness vocabulary plus the
+  pure readiness aggregator.
+- Nine checks across `environment`, `omarchy` and `hyprland`.
+- Result UI: findings in the quick panel, the full catalog in the overlay
+  grouped by category and sorted worst-first, with expandable evidence and full
+  keyboard navigation.
+- Quick-panel IPC target `p134c0d3.omapreflight.panel` (`open`/`close`/`toggle`)
+  so the panel is reachable without a mouse; `cancel` and `results` added to the
+  service target.
+- `docs/security.md` — threat model, trust boundaries, the enforced invariants
+  with their CWE mapping, and the residual risks that are *not* mitigated.
+- `SECURITY.md` — private vulnerability reporting and scope.
+- Argument-injection defence (CWE-88): externally-sourced argv elements are
+  declared via `dataArgs` and validated — no leading dash, no control
+  characters, and paths must be absolute, free of `..` segments, and inside a
+  declared root matched on a segment boundary.
+- `scripts/check` gained structural invariants (`Process` only in
+  `core/CommandJob.qml`, `FileView` only in `core/FileReadJob.qml`), a
+  dynamic-code guard, a detached-process guard, and a `--portable` mode.
+- GitHub Actions workflow running the portable checks on every push and pull
+  request.
+
+### Changed
+
+- Path validation is segment-wise rather than substring-based, so `..config` is
+  no longer a false positive and `plugins-evil` no longer satisfies an
+  allowlisted `plugins` root.
+
 ## [0.1.0] — 2026-08-24
 
 Runtime foundation (Milestone 0). The plugin loads and its surfaces work; the

@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# Static validation for OmaPreflight: manifest schema + QML lint.
+# Static validation for OmaPreflight: manifest, QML lint, and the security
+# invariants documented in docs/security.md.
+#
 # Run from anywhere; operates on the repository root.
+#
+#   scripts/check              everything (needs Omarchy + qt6-declarative)
+#   scripts/check --portable   only what runs anywhere: manifest sanity, the
+#                              safety invariants, and the structural checks.
+#                              This is what CI runs, where neither Omarchy nor
+#                              Quickshell exists.
 #
 # Two things this script exists to get right:
 #
@@ -20,26 +28,67 @@ OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
 QT_BIN="${QT_BIN:-/usr/lib/qt6/bin}"
 QML_IMPORTS="${QML_IMPORTS:-/usr/lib/qt6/qml}"
 
+portable=0
+[[ ${1:-} == --portable ]] && portable=1
+
 status=0
 note() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$*"; status=1; }
 pass() { printf '\033[32m ok \033[0m %s\n' "$*"; }
 
 # ---------------------------------------------------------------- manifest
-note "Validating manifest against the Omarchy plugin schema"
-if command -v omarchy >/dev/null 2>&1; then
+# The authoritative check is the Omarchy validator. Where it is unavailable we
+# re-assert the parts of the contract that can be checked with jq alone, so a
+# pull request still cannot land a manifest that names an entry point which
+# does not exist.
+note "Validating the manifest"
+if (( portable == 0 )) && command -v omarchy >/dev/null 2>&1; then
   if omarchy plugin validate "$REPO_ROOT"; then
     pass "omarchy plugin validate"
   else
     fail "omarchy plugin validate"
   fi
-else
+elif (( portable == 0 )); then
   fail "omarchy CLI not found; cannot validate the manifest"
+else
+  manifest="$REPO_ROOT/manifest.json"
+  if ! jq -e . "$manifest" >/dev/null 2>&1; then
+    fail "manifest.json is not valid JSON"
+  else
+    missing=$(jq -r '["schemaVersion","id","name","version","author","license","description","kinds","entryPoints"]
+                     - (keys) | join(", ")' "$manifest")
+    if [[ -n "$missing" ]]; then
+      fail "manifest is missing required field(s): $missing"
+    else
+      pass "manifest has every required field"
+    fi
+
+    # The id is the plugin's permanent identity and the marketplace enforces
+    # its shape; getting it wrong after publishing is not fixable.
+    id=$(jq -r .id "$manifest")
+    if [[ "$id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$id" != omarchy.* ]]; then
+      pass "plugin id '$id' is well formed"
+    else
+      fail "plugin id '$id' is not a valid third-party id"
+    fi
+
+    entry_missing=0
+    while IFS= read -r entry; do
+      [[ -z "$entry" ]] && continue
+      if [[ ! -f "$REPO_ROOT/$entry" ]]; then
+        fail "entryPoints names a file that does not exist: $entry"
+        entry_missing=1
+      fi
+    done < <(jq -r '.entryPoints | to_entries[] | .value' "$manifest")
+    (( entry_missing == 0 )) && pass "every entry point exists on disk"
+  fi
 fi
 
 # ------------------------------------------------------------------- lint
 note "Linting QML"
-if [[ ! -x "$QT_BIN/qmllint" ]]; then
+if (( portable == 1 )); then
+  pass "qmllint skipped (portable mode: Quickshell and the Omarchy shell are not present)"
+elif [[ ! -x "$QT_BIN/qmllint" ]]; then
   fail "qmllint not found at $QT_BIN/qmllint (install qt6-declarative)"
 else
   SHIM="$(mktemp -d -t omapreflight-lint-XXXXXX)"
@@ -57,16 +106,29 @@ else
 fi
 
 # ------------------------------------------------------------ safety grep
-# Cheap, high-signal guards for the invariants in ENGINEERING_SPEC §33. These
-# catch an accidental regression long before a human review would.
+# Cheap, high-signal guards for the invariants in docs/security.md and
+# ENGINEERING_SPEC §33. These catch an accidental regression long before a
+# human review would, and they are the reason the security model can claim to
+# be enforced rather than merely intended.
 note "Checking safety invariants"
 scan_paths=()
 while IFS= read -r f; do scan_paths+=("$f"); done < <(
   find "$REPO_ROOT" \( -name '*.qml' -o -name '*.js' \) -not -path '*/.git/*' -not -path '*/tests/*'
 )
+
+# Guard: <description> <grep-args...>  — fails when the pattern matches.
+guard() {
+  local description="$1"; shift
+  if grep -nE "$@" "${scan_paths[@]}"; then
+    fail "$description"
+  else
+    pass "$description — clean"
+  fi
+}
+
 if (( ${#scan_paths[@]} > 0 )); then
-  # The one legitimate mention is CommandRunner's refusal list, which is why
-  # those lines carry an explicit marker comment. Everything else is a defect.
+  # §23.4 / §33.1. The one legitimate mention is CommandRunner's refusal list,
+  # which is why those lines carry an explicit marker comment.
   if grep -nE '(^|[^A-Za-z_])sudo[^A-Za-z_]' "${scan_paths[@]}" \
        | grep -v 'privilege-escalation denylist'; then
     fail "sudo referenced in plugin code (spec §33.1)"
@@ -74,16 +136,41 @@ if (( ${#scan_paths[@]} > 0 )); then
     pass "no sudo outside the refusal list"
   fi
 
-  if grep -nE '"(sh|bash)"[[:space:]]*,[[:space:]]*"-c"' "${scan_paths[@]}"; then
-    fail "shell -c command construction found (spec §23.1)"
+  # CWE-78. There is no shell anywhere in the plugin, so there is nothing to
+  # quote and nothing to escape.
+  guard "no shell command construction (CWE-78)" '"(sh|bash|zsh|fish|dash)"[[:space:]]*,[[:space:]]*"-c"'
+
+  # CWE-94. Turning any string into code is out of scope for a diagnostic tool,
+  # and every string this plugin holds came from another program's output.
+  guard "no dynamic code evaluation (CWE-94)" \
+    '(^|[^A-Za-z_.])eval[[:space:]]*\(|new[[:space:]]+Function[[:space:]]*\(|Qt\.createQmlObject|Qt\.include'
+
+  # §33.8/§33.9. MVP has no network behaviour at all; a report is written
+  # locally and the user decides what to do with it.
+  guard "no network access (§33.8)" \
+    'XMLHttpRequest|fetch\(|Qt\.openUrlExternally|https?://[^"]*"[[:space:]]*\)'
+
+  # A detached process outlives the runner, which means it escapes the timeout,
+  # the output caps and cancellation all at once (CWE-770).
+  guard "no detached processes" 'startDetached'
+
+  # Structural invariant: exactly one file may start a process, and exactly one
+  # may read a file. Everything else has to go through the hardened wrappers,
+  # which is what makes the argument- and path-validation rules meaningful
+  # rather than advisory.
+  note "Checking the single-entry-point invariants"
+  process_sites=$(grep -lE '^[[:space:]]*(property[[:space:]]+Process[[:space:]]+[A-Za-z_]+:[[:space:]]*)?Process[[:space:]]*\{' "${scan_paths[@]}" || true)
+  if [[ "$process_sites" == "$REPO_ROOT/core/CommandJob.qml" || -z "$process_sites" ]]; then
+    pass "Process is only instantiated in core/CommandJob.qml"
   else
-    pass "no sh -c command construction"
+    fail "Process instantiated outside core/CommandJob.qml:"$'\n'"$process_sites"
   fi
 
-  if grep -nE 'XMLHttpRequest|fetch\(|Qt\.openUrlExternally|https?://[^"]*"\s*\)' "${scan_paths[@]}"; then
-    fail "possible network access (spec §33.8/§33.9)"
+  fileview_sites=$(grep -lE '^[[:space:]]*(property[[:space:]]+FileView[[:space:]]+[A-Za-z_]+:[[:space:]]*)?FileView[[:space:]]*\{' "${scan_paths[@]}" || true)
+  if [[ "$fileview_sites" == "$REPO_ROOT/core/FileReadJob.qml" || -z "$fileview_sites" ]]; then
+    pass "FileView is only instantiated in core/FileReadJob.qml"
   else
-    pass "no network access"
+    fail "FileView instantiated outside core/FileReadJob.qml:"$'\n'"$fileview_sites"
   fi
 fi
 
