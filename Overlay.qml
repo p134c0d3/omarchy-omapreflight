@@ -243,8 +243,26 @@ Item {
     // compositor will place it on, so asking for the content height and
     // letting Hyprland clamp to the monitor beats capping at a number that is
     // too small on a tall screen and too large on a laptop panel.
-    implicitHeight: Math.min(Style.space(2000), content.naturalHeight)
+    //
+    // `heldHeight` stops the window collapsing mid-scan. Results are replaced
+    // as they arrive, so the first result of a rescan briefly makes the content
+    // one row tall — without this the window snaps to its minimum and then
+    // grows back a row at a time, which looks broken and which the compositor
+    // does not always follow all the way back up.
+    property real heldHeight: 0
+
+    implicitHeight: Math.min(Style.space(2000),
+                             Math.max(content.naturalHeight, window.heldHeight))
     minimumSize: Qt.size(Style.space(420), Style.space(260))
+
+    // Freeze the height for the duration of a scan, release it when the scan
+    // ends so the window can settle to whatever the new results actually need.
+    Connections {
+      target: root
+      function onScanRunningChanged() {
+        window.heldHeight = root.scanRunning ? window.height : 0
+      }
+    }
 
     // Closing the window with the compositor (or its own close button) has to
     // tell the host, or the shell keeps believing the panel is open and the

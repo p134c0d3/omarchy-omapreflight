@@ -189,6 +189,7 @@ from, and what reaches disk.
 | [Security model](docs/security.md) | Trust boundaries, enforced invariants, and the residual risks |
 | [Architecture](docs/architecture.md) | How it fits together, and how to add a check |
 | [Environment](docs/environment.md) | Verified Omarchy and Quickshell behaviour, including the traps |
+| [Screenshots](screenshots/) | What it looks like, and how to reproduce them |
 | [Decisions](docs/adr/) | ADRs: shared state, serial execution, pure-JS logic, theming, window vs layer surface |
 
 ## Development
