@@ -61,105 +61,114 @@ var FAILED_USER_UNITS = {
 }
 
 // Root and home are separate checks because they are frequently separate
-// filesystems, and because they fail for different reasons: root fills with
+// filesystems, and because they fill for different reasons: root fills with
 // packages, home fills with everything else.
-function _diskCheck(id, title, pathKey, description) {
-  return {
-    id: id,
-    title: title,
-    category: "runtime",
-    description: description,
-    requiredCapabilities: [],
-    defaultSeverity: "error",
-    timeoutMs: 5000,
-    run: function (ctx, done) {
-      var target = pathKey === "root" ? "/" : String(ctx.paths.home || "")
-      if (target.length === 0) {
-        done(R.skippedResult({ id: id }, "No home directory is known."))
+//
+// Both are literal definitions that delegate to one shared runner. A factory
+// returning built objects would be tidier to write and would hide the ids from
+// `scripts/check`, which compares the declared ids against
+// docs/check-catalog.md — and a catalog that silently stops covering a check is
+// exactly the drift that guard exists to catch.
+var DISK_ROOT = {
+  id: "runtime.disk-space-root",
+  title: "Free space on /",
+  category: "runtime",
+  description: "Checks free space on the root filesystem, where packages land.",
+  requiredCapabilities: [],
+  defaultSeverity: "error",
+  timeoutMs: 5000,
+  run: function (ctx, done) { _checkFreeSpace(ctx, done, DISK_ROOT, "/") }
+}
+
+var DISK_HOME = {
+  id: "runtime.disk-space-home",
+  title: "Free space on home",
+  category: "runtime",
+  description: "Checks free space on the filesystem holding your home "
+    + "directory, where reports and baselines land.",
+  requiredCapabilities: [],
+  defaultSeverity: "error",
+  timeoutMs: 5000,
+  run: function (ctx, done) { _checkFreeSpace(ctx, done, DISK_HOME, String(ctx.paths.home || "")) }
+}
+
+function _checkFreeSpace(ctx, done, definition, target) {
+  if (target.length === 0) {
+    done(R.skippedResult(definition, "No home directory is known."))
+    return
+  }
+
+  // -P is the POSIX single-line-per-filesystem format and -k fixes the block
+  // size, so nothing has to parse a human-readable suffix.
+  ctx.exec(["df", "-Pk", "--", target],
+    { timeoutMs: 5000, dataArgs: [3] }, function (result) {
+      if (result.blocked) {
+        done({
+          status: R.STATUS.UNKNOWN,
+          summary: "Refused to check free space: " + result.blockedReason + "."
+        })
+        return
+      }
+      if (!result.ok) {
+        done({
+          status: R.STATUS.UNKNOWN,
+          summary: "Could not read free space for " + target + ".",
+          evidence: [R.evidence("command", "df -Pk " + target, "exit " + result.exitCode)]
+        })
         return
       }
 
-      // -P is the POSIX single-line-per-filesystem format and -k fixes the
-      // block size, so nothing has to parse a human-readable suffix.
-      ctx.exec(["df", "-Pk", "--", target],
-        { timeoutMs: 5000, dataArgs: [3] }, function (result) {
-          if (result.blocked) {
-            done({
-              status: R.STATUS.UNKNOWN,
-              summary: "Refused to check free space: " + result.blockedReason + "."
-            })
-            return
-          }
-          if (!result.ok) {
-            done({
-              status: R.STATUS.UNKNOWN,
-              summary: "Could not read free space for " + target + ".",
-              evidence: [R.evidence("command", "df -Pk " + target, "exit " + result.exitCode)]
-            })
-            return
-          }
-
-          var usage = DiskUsage.parse(result.stdout)
-          if (!usage.ok) {
-            done({
-              status: R.STATUS.UNKNOWN,
-              summary: "Could not interpret df output: " + usage.error + ".",
-              evidence: [R.evidence("command", "df -Pk " + target, Json.clip(result.stdout, 4))]
-            })
-            return
-          }
-
-          var free = DiskUsage.formatGiB(usage.availableGiB)
-          var assessment = DiskUsage.assess(usage)
-          var evidence = [R.evidence("command", "df -Pk " + target,
-            usage.mountedOn + " — " + free + " free of "
-            + DiskUsage.formatGiB(usage.totalKiB / 1048576))]
-
-          // The thresholds are conservative and documented, and they are not a
-          // prediction of how much an update needs — nothing here can know
-          // that, and claiming to would be the kind of invented heuristic §18
-          // rules out.
-          if (assessment.level === "critical") {
-            done({
-              status: R.STATUS.FAIL,
-              // A blocker: an update that runs out of space part-way through is
-              // the single most reliable way to end up with a broken system.
-              severity: R.SEVERITY.BLOCKER,
-              summary: "Only " + free + " free on " + usage.mountedOn + ".",
-              details: ["Below the " + assessment.threshold + " GiB floor OmaPreflight treats as unsafe. "
-                + "This is a conservative fixed threshold, not an estimate of what an update needs."],
-              evidence: evidence,
-              remediation: "Free some space before updating — `omarchy update pkg prune` and "
-                + "`omarchy update orphan pkgs` are the usual first moves."
-            })
-            return
-          }
-
-          if (assessment.level === "low") {
-            done({
-              status: R.STATUS.WARN,
-              summary: free + " free on " + usage.mountedOn + ".",
-              details: ["Under " + assessment.threshold + " GiB. Probably fine, worth knowing."],
-              evidence: evidence
-            })
-            return
-          }
-
-          done({
-            status: R.STATUS.PASS,
-            summary: free + " free on " + usage.mountedOn + " (" + usage.usedPercent + "% used).",
-            evidence: evidence
-          })
+      var usage = DiskUsage.parse(result.stdout)
+      if (!usage.ok) {
+        done({
+          status: R.STATUS.UNKNOWN,
+          summary: "Could not interpret df output: " + usage.error + ".",
+          evidence: [R.evidence("command", "df -Pk " + target, Json.clip(result.stdout, 4))]
         })
-    }
-  }
+        return
+      }
+
+      var free = DiskUsage.formatGiB(usage.availableGiB)
+      var assessment = DiskUsage.assess(usage)
+      var evidence = [R.evidence("command", "df -Pk " + target,
+        usage.mountedOn + " — " + free + " free of "
+        + DiskUsage.formatGiB(usage.totalKiB / 1048576))]
+
+      // The thresholds are conservative and documented, and they are not a
+      // prediction of how much an update needs — nothing here can know that,
+      // and claiming to would be the kind of invented heuristic §18 rules out.
+      if (assessment.level === "critical") {
+        done({
+          status: R.STATUS.FAIL,
+          // A blocker: an update that runs out of space part-way through is the
+          // single most reliable way to end up with a broken system.
+          severity: R.SEVERITY.BLOCKER,
+          summary: "Only " + free + " free on " + usage.mountedOn + ".",
+          details: ["Below the " + assessment.threshold + " GiB floor OmaPreflight treats as unsafe. "
+            + "This is a conservative fixed threshold, not an estimate of what an update needs."],
+          evidence: evidence,
+          remediation: "Free some space before updating — `omarchy update pkg prune` and "
+            + "`omarchy update orphan pkgs` are the usual first moves."
+        })
+        return
+      }
+
+      if (assessment.level === "low") {
+        done({
+          status: R.STATUS.WARN,
+          summary: free + " free on " + usage.mountedOn + ".",
+          details: ["Under " + assessment.threshold + " GiB. Probably fine, worth knowing."],
+          evidence: evidence
+        })
+        return
+      }
+
+      done({
+        status: R.STATUS.PASS,
+        summary: free + " free on " + usage.mountedOn + " (" + usage.usedPercent + "% used).",
+        evidence: evidence
+      })
+    })
 }
-
-var DISK_ROOT = _diskCheck("runtime.disk-space-root", "Free space on /", "root",
-  "Checks free space on the root filesystem, where packages land.")
-
-var DISK_HOME = _diskCheck("runtime.disk-space-home", "Free space on home", "home",
-  "Checks free space on the filesystem holding your home directory, where "
-  + "reports and baselines land.")
 
 var ALL = [FAILED_USER_UNITS, DISK_ROOT, DISK_HOME]

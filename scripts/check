@@ -175,6 +175,36 @@ if (( ${#scan_paths[@]} > 0 )); then
   fi
 fi
 
+# --------------------------------------------------------- catalog drift
+# A documented catalog that has drifted from the code is worse than none: it
+# describes checks that no longer run and stays silent about ones that do. So
+# the two are compared rather than trusted to stay in step.
+note "Checking the catalog documentation against the code"
+catalog_doc="$REPO_ROOT/docs/check-catalog.md"
+if [[ ! -f "$catalog_doc" ]]; then
+  fail "docs/check-catalog.md is missing"
+else
+  # Anchored on the `id:` property so a check id mentioned in prose, a fact
+  # path like "hyprland.version", or a config filename like "hyprland.lua"
+  # cannot be mistaken for a declaration. This is also why every check
+  # definition is a literal object rather than something a factory builds.
+  code_ids=$(grep -hoE '^  id: "[a-z][a-z0-9]*\.[a-z0-9-]+"' "$REPO_ROOT"/checks/*.js \
+    | sed -E 's/.*"(.*)"/\1/' | sort -u)
+  doc_ids=$(grep -oE '^### `[a-z][a-z0-9]*\.[a-z0-9-]+`' "$catalog_doc" \
+    | sed -E 's/^### `(.*)`/\1/' | sort -u)
+
+  undocumented=$(comm -23 <(echo "$code_ids") <(echo "$doc_ids"))
+  phantom=$(comm -13 <(echo "$code_ids") <(echo "$doc_ids"))
+
+  if [[ -n "$undocumented" ]]; then
+    fail "checks with no entry in docs/check-catalog.md:"$'\n'"$undocumented"
+  elif [[ -n "$phantom" ]]; then
+    fail "docs/check-catalog.md documents checks that do not exist:"$'\n'"$phantom"
+  else
+    pass "check catalog matches the code ($(echo "$code_ids" | wc -l) checks)"
+  fi
+fi
+
 # ------------------------------------------------------------ no symlinks
 note "Checking for symlinks (the validator rejects them)"
 if link=$(find "$REPO_ROOT" -name .git -prune -o -type l -print -quit); [[ -n ${link:-} ]]; then

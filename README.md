@@ -177,8 +177,19 @@ CWE mapping, and an honest list of what is *not* mitigated are in
 [docs/security.md](docs/security.md). To report a vulnerability, see
 [SECURITY.md](SECURITY.md).
 
-See [docs/privacy.md](docs/privacy.md) once the engine lands for the full data
-model.
+[docs/privacy.md](docs/privacy.md) lists every value collected, where it comes
+from, and what reaches disk.
+
+## Documentation
+
+| | |
+|---|---|
+| [Check catalog](docs/check-catalog.md) | All 21 checks, what each one runs, and what every outcome means |
+| [Privacy](docs/privacy.md) | Every value collected, its source, and what reaches disk |
+| [Security model](docs/security.md) | Trust boundaries, enforced invariants, and the residual risks |
+| [Architecture](docs/architecture.md) | How it fits together, and how to add a check |
+| [Environment](docs/environment.md) | Verified Omarchy and Quickshell behaviour, including the traps |
+| [Decisions](docs/adr/) | ADRs: shared state, serial execution, pure-JS logic, theming, window vs layer surface |
 
 ## Development
 
