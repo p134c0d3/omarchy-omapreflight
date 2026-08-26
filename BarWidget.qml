@@ -14,17 +14,25 @@ import "core/ResultModel.js" as R
 // one QML entry point". It supplies the opened/open()/close()/toggle()
 // lifecycle the shell and the marketplace checklist expect.
 //
-// The quick panel gets its own IPC target, distinct from the service's. The
-// shell permits one handler per target name, so `p134c0d3.omapreflight` stays
-// the service's (run/status/cancel/results) and the panel answers on
-// `p134c0d3.omapreflight.panel` (open/close/toggle). That separation is also
-// the only way to reach this surface without a mouse: because the manifest
-// declares kind `overlay`, `omarchy-shell shell toggle <id>` opens the overlay,
-// not this panel.
+// `ipcTarget` is deliberately left unset, and the quick panel's IPC lives on
+// the service instead (`openPanel` / `closePanel` / `togglePanel`).
+//
+// The reason is the bar: one instance of this widget exists per screen, so a
+// handler declared here would be registered two or more times against one
+// target name. Quickshell keeps the first and warns about the rest — which is
+// exactly what every first-party panel with an `ipcTarget` does on a
+// multi-monitor machine. The service is mounted exactly once (ADR-001), so
+// putting the handler there gives one registration and no warning. It also
+// routes through `Bar.summonBarWidget`, the host's own resolver, which picks
+// the instance on the output Hyprland currently has focused rather than
+// whichever copy won the race to claim a target name.
+//
+// This surface needs IPC of its own at all because `omarchy-shell shell toggle
+// <id>` opens the overlay: the manifest declares that kind, so the host routes
+// summon there.
 Panel {
   id: root
   moduleName: "p134c0d3.omapreflight"
-  ipcTarget: "p134c0d3.omapreflight.panel"
 
   // The service is the shared store (ADR-001). It may briefly be null while the
   // shell mounts plugins, so every read below is guarded.

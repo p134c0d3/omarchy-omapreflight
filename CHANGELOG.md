@@ -30,9 +30,21 @@ Diagnostic engine (Milestone 1) and the security model.
 - Result UI: findings in the quick panel, the full catalog in the overlay
   grouped by category and sorted worst-first, with expandable evidence and full
   keyboard navigation.
-- Quick-panel IPC target `p134c0d3.omapreflight.panel` (`open`/`close`/`toggle`)
-  so the panel is reachable without a mouse; `cancel` and `results` added to the
-  service target.
+- Sanitized Markdown reports (§26), written into the state directory and never
+  uploaded: `core/Sanitizer.js`, `core/ReportBuilder.qml`, `core/FileWriter.qml`
+  with atomic writes, and Save/Copy actions plus `S`/`C` keys in the overlay.
+  The reports directory is created 0700.
+- `cancel`, `results`, `report`, `openPanel`, `closePanel` and `togglePanel` on
+  the service IPC target. The panel methods live on the service, not the
+  widget, because one widget instance exists per screen: the service routes
+  through the shell's own bar resolver, which picks the instance on the focused
+  output instead of whichever copy claimed a target name first.
+- `core/ExecPolicy.js` — the execution and path policy as pure functions, shared
+  by CommandRunner, FileReader and FileWriter so one implementation of the path
+  rules exists rather than three.
+- Test suite: 131 cases across the readiness aggregator, every parser, the
+  sanitizer and the execution policy, run with `scripts/test`. Parser fixtures
+  are real output captured from a live machine.
 - `docs/security.md` — threat model, trust boundaries, the enforced invariants
   with their CWE mapping, and the residual risks that are *not* mitigated.
 - `SECURITY.md` — private vulnerability reporting and scope.

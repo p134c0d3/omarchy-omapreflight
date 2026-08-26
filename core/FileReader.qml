@@ -1,4 +1,5 @@
 import QtQuick
+import "ExecPolicy.js" as ExecPolicy
 
 // The only place in OmaPreflight that reads a file.
 //
@@ -51,47 +52,21 @@ QtObject {
     job.start()
   }
 
-  // CWE-22. Three rules, in order of how much they matter:
+  // CWE-22, via the shared policy in core/ExecPolicy.js: absolute, no `..`
+  // segment, and inside one of the allowlisted roots — matched on a segment
+  // boundary, so an allowlisted ".../omarchy" cannot be satisfied by
+  // ".../omarchy-evil".
   //
-  //   absolute      — a relative path resolves against a working directory
-  //                   this object has no opinion about;
-  //   no traversal  — checked segment-wise, so a directory legitimately named
-  //                   "..config" passes and "/a/../../etc/shadow" does not;
-  //   inside a root — prefix matched on a segment boundary, so an allowlisted
-  //                   ".../omarchy/plugins" cannot be satisfied by
-  //                   ".../omarchy/plugins-evil".
-  //
-  // Note what this does *not* do: resolve symlinks. It cannot — there is no
-  // realpath available to QML — so an attacker who can already plant a symlink
-  // inside an allowlisted directory can redirect a read. That is documented as
-  // a residual risk in docs/security.md rather than papered over here, and it
-  // is bounded by the fact that every read is inert: the content only ever
+  // Note what this does *not* do: resolve symlinks. It cannot — QML has no
+  // realpath — so an attacker who can already plant a symlink inside an
+  // allowlisted directory can redirect a read. That is documented as a
+  // residual risk in docs/security.md rather than papered over here, and it is
+  // bounded by the fact that every read is inert: the content only ever
   // becomes evidence text.
   function _refusalFor(target) {
-    if (target.length === 0) return "empty path"
-    if (target.indexOf("/") !== 0) return "path is not absolute"
-    if (_hasTraversal(target)) return "path contains a parent traversal"
-    if (allowedPrefixes.length === 0) return ""
-    if (_isUnderRoot(target, allowedPrefixes)) return ""
-    return "path is outside the OmaPreflight read allowlist"
-  }
-
-  function _hasTraversal(path) {
-    var segments = path.split("/")
-    for (var i = 0; i < segments.length; i++) {
-      if (segments[i] === "..") return true
-    }
-    return false
-  }
-
-  function _isUnderRoot(path, roots) {
-    for (var i = 0; i < roots.length; i++) {
-      var root = String(roots[i])
-      if (root.length === 0) continue
-      if (root.charAt(root.length - 1) !== "/") root = root + "/"
-      if (path === root.substring(0, root.length - 1)) return true
-      if (path.indexOf(root) === 0) return true
-    }
-    return false
+    var refusal = ExecPolicy.pathRefusal(target, root.allowedPrefixes)
+    if (refusal === "") return ""
+    if (refusal === "is outside the permitted roots") return "path is outside the OmaPreflight read allowlist"
+    return "path " + refusal
   }
 }

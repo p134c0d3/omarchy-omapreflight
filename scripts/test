@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Run the pure-logic test suite.
+#
+# Everything under tests/ exercises plain JavaScript modules — the readiness
+# aggregator, the parsers, the sanitizer, and the execution policy. That is
+# deliberate: qmltestrunner cannot load Quickshell's C++ QML plugin outside a
+# shell process, so any logic worth testing lives in a `.js` module that the
+# QML types delegate to.
+#
+# The QML types themselves are verified by running them: `scripts/dev-install`
+# and then exercising the plugin in the live shell.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+QT_BIN="${QT_BIN:-/usr/lib/qt6/bin}"
+
+if [[ ! -x "$QT_BIN/qmltestrunner" ]]; then
+  echo "qmltestrunner not found at $QT_BIN/qmltestrunner (install qt6-declarative)" >&2
+  exit 1
+fi
+
+cd "$REPO_ROOT"
+exec "$QT_BIN/qmltestrunner" -input tests/ "$@"

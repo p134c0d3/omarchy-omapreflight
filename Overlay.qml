@@ -113,6 +113,37 @@ Item {
     if (service && typeof service.cancelPreflight === "function") service.cancelPreflight()
   }
 
+  // Reports are written locally and shared only by the user's own hand (§24).
+  // The footer states where the file went, because "saved!" with no path is
+  // not information.
+  property string reportNotice: ""
+
+  function saveReport() {
+    if (!service || typeof service.saveReport !== "function") return
+    root.reportNotice = "Writing report…"
+    service.saveReport(function (result) {
+      root.reportNotice = result.ok
+        ? "Report written to " + root.shorten(result.path)
+        : "Could not write the report: " + result.error
+      noticeTimer.restart()
+    })
+  }
+
+  function copyReport() {
+    if (!service || typeof service.copyReport !== "function") return
+    var outcome = service.copyReport()
+    root.reportNotice = outcome === "copied"
+      ? "Report copied to the clipboard — review it before posting."
+      : "Nothing to copy yet."
+    noticeTimer.restart()
+  }
+
+  function shorten(path) {
+    var home = service && service.homeDir ? String(service.homeDir) : ""
+    if (home.length > 0 && String(path).indexOf(home) === 0) return "~" + String(path).substring(home.length)
+    return String(path)
+  }
+
   function isExpanded(id) {
     return root.expandedIds[String(id)] === true
   }
@@ -156,6 +187,13 @@ Item {
 
   // Only ticks while the overlay is open, and only once a minute: it exists to
   // keep "scanned 3 minutes ago" honest, not to animate anything.
+  Timer {
+    id: noticeTimer
+    interval: 12000
+    repeat: false
+    onTriggered: root.reportNotice = ""
+  }
+
   Timer {
     id: tick
     property real now: Date.now()
@@ -247,6 +285,14 @@ Item {
             if (!root.scanRunning) root.runScan()
             event.accepted = true
             break
+          case Qt.Key_S:
+            root.saveReport()
+            event.accepted = true
+            break
+          case Qt.Key_C:
+            root.copyReport()
+            event.accepted = true
+            break
           }
         }
 
@@ -289,6 +335,30 @@ Item {
               spacing: Style.space(10)
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
+
+              Button {
+                text: "Copy"
+                // qs.Ui.Button has no disabled styling of its own, so the
+                // opacity is what actually communicates the state.
+                enabled: root.orderedResults.length > 0
+                opacity: enabled ? 1.0 : 0.45
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                bordered: true
+                focusable: true
+                onClicked: root.copyReport()
+              }
+
+              Button {
+                text: "Save report"
+                enabled: root.orderedResults.length > 0
+                opacity: enabled ? 1.0 : 0.45
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                bordered: true
+                focusable: true
+                onClicked: root.saveReport()
+              }
 
               Button {
                 text: root.scanRunning ? "Cancel" : "Run scan"
@@ -361,15 +431,30 @@ Item {
         }
 
         // ---- footer -------------------------------------------------
-        Text {
+        Column {
           id: footer
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.bottom: parent.bottom
-          text: "↑↓ move   ⏎ expand   R rescan   Esc close"
-          color: Qt.darker(root.foreground, 1.7)
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+          spacing: Style.space(4)
+
+          Text {
+            visible: root.reportNotice.length > 0
+            width: parent.width
+            text: root.reportNotice
+            color: Qt.darker(root.foreground, 1.35)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          Text {
+            width: parent.width
+            text: "↑↓ move   ⏎ expand   R rescan   S save   C copy   Esc close"
+            color: Qt.darker(root.foreground, 1.7)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
         }
 
         // ---- results ------------------------------------------------

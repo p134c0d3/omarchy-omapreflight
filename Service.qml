@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "core" as Core
+import "core/Sanitizer.js" as Sanitizer
 import "checks/Registry.js" as Registry
 
 // OmaPreflight service — the single long-lived object the shell mounts for this
@@ -39,9 +40,12 @@ Item {
   readonly property string stateDir: stateHome + "/omapreflight"
   readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || (homeDir + "/.config")
 
+  readonly property string reportsDir: stateDir + "/reports"
+
   readonly property var paths: ({
     home: root.homeDir,
     stateDir: root.stateDir,
+    reportsDir: root.reportsDir,
     configDir: root.configHome,
     omarchyConfigDir: root.configHome + "/omarchy",
     shellConfig: root.configHome + "/omarchy/shell.json",
@@ -62,7 +66,23 @@ Item {
     ]
   }
 
+  property Core.FileWriter fileWriter: Core.FileWriter {
+    // One writable directory, for the whole plugin, forever.
+    stateDir: root.stateDir
+  }
+
   property Core.CapabilityRegistry capabilities: Core.CapabilityRegistry {}
+
+  property Core.ReportBuilder reportBuilder: Core.ReportBuilder {
+    store: root.store
+    capabilities: root.capabilities
+    pluginVersion: root.pluginVersion
+    paths: root.paths
+    sanitizeContext: Sanitizer.makeContext({
+      home: root.homeDir,
+      user: Quickshell.env("USER") || ""
+    })
+  }
 
   property Core.CheckEngine engine: Core.CheckEngine {
     runner: root.runner
@@ -101,14 +121,105 @@ Item {
     return JSON.stringify(store.summary())
   }
 
+  // ---- reports (spec §26) ---------------------------------------------
+  //
+  // Written locally, never uploaded. `saveReport` returns the path through the
+  // callback; the surfaces show it so the user knows exactly what exists and
+  // where.
+  // Returns the path it is writing to, synchronously, and delivers the outcome
+  // through the callback. The path is deterministic, so a caller that only
+  // wants to tell the user where the file will be does not have to wait.
+  function saveReport(callback) {
+    if (!store.results || store.results.length === 0) {
+      if (callback) callback({ ok: false, error: "no scan results to report", path: "" })
+      return ""
+    }
+
+    var markdown = reportBuilder.build()
+    var target = reportBuilder.suggestedPath()
+
+    // The directory may not exist yet, and a write into a missing directory
+    // fails in a way that reads like a permissions problem. Create it first,
+    // then write regardless of the mkdir's outcome — if it genuinely failed,
+    // the write's own error is the more useful one to report.
+    ensureStateDirs(function () {
+      root.fileWriter.write(target, markdown, function (result) {
+        if (!result.ok) root.log("report write failed: " + result.error)
+        if (callback) callback(result)
+      })
+    })
+
+    return target
+  }
+
+  // Copying is explicitly user-initiated, from a button. Nothing reaches the
+  // clipboard on its own.
+  function copyReport() {
+    if (!store.results || store.results.length === 0) return "empty"
+    Quickshell.clipboardText = reportBuilder.build()
+    return "copied"
+  }
+
+  property bool stateDirsEnsured: false
+
+  // 0700 so a report is not world-readable on a shared machine. The files
+  // themselves land with the process umask; the directory mode is what
+  // actually protects them.
+  function ensureStateDirs(done) {
+    if (stateDirsEnsured) {
+      if (done) done()
+      return
+    }
+    runner.run(["mkdir", "-p", "-m", "700", root.reportsDir],
+               { timeoutMs: 4000, dataArgs: [4], allowedRoots: [root.stateHome] },
+               function (result) {
+                 root.stateDirsEnsured = result.ok
+                 if (!result.ok && result.blocked) root.log("state directory refused: " + result.blockedReason)
+                 if (done) done()
+               })
+  }
+
   function resultsJson() {
     return JSON.stringify(store.results)
   }
 
+  // ---- quick panel routing ---------------------------------------------
+  //
+  // One instance of the bar widget exists per screen, so "open the panel" has
+  // to answer "which one?". The shell already solved this: `Bar.findPanelWidget`
+  // picks the instance on the output Hyprland currently has focused, which is
+  // why `shell.summon` routes through the bar rather than through a per-target
+  // IPC handler — a handler declared on the widget would only ever reach
+  // whichever per-monitor copy registered first.
+  //
+  // So the panel's IPC lives here, on the single service instance, and
+  // delegates to the host's own routing.
+  function _bar() {
+    return shell && shell.bar ? shell.bar : null
+  }
+
+  function openPanelSurface() {
+    var bar = _bar()
+    if (!bar || typeof bar.summonBarWidget !== "function") return "unavailable"
+    return bar.summonBarWidget(root.pluginId) ? "open" : "no-panel"
+  }
+
+  function closePanelSurface() {
+    var bar = _bar()
+    if (!bar || typeof bar.hideBarWidget !== "function") return "unavailable"
+    return bar.hideBarWidget(root.pluginId) ? "closed" : "no-panel"
+  }
+
+  function togglePanelSurface() {
+    var bar = _bar()
+    if (!bar || typeof bar.isBarWidgetOpen !== "function") return "unavailable"
+    return bar.isBarWidgetOpen(root.pluginId) ? closePanelSurface() : openPanelSurface()
+  }
+
   IpcHandler {
-    // One IpcHandler per target. This service owns the plugin's target, which
-    // is why BarWidget.qml leaves `ipcTarget` unset (qs.Ui.Panel would
-    // otherwise register a second handler on the same name).
+    // One IpcHandler per target name. This service owns the plugin's own
+    // target; the bar widget's quick panel answers on
+    // `p134c0d3.omapreflight.panel` so the two cannot collide.
     target: "p134c0d3.omapreflight"
 
     function ping(): string {
@@ -130,6 +241,20 @@ Item {
     function results(): string {
       return root.resultsJson()
     }
+
+    // Writes a sanitized Markdown report into the state directory and returns
+    // the path it is being written to. Nothing is uploaded (§24).
+    function report(): string {
+      var path = root.saveReport(null)
+      return path === "" ? "no-results" : path
+    }
+
+    // The bar widget's quick panel, on every screen that has one. Bindable to
+    // a hotkey; without this the panel is mouse-only, because `shell toggle`
+    // is claimed by the overlay.
+    function openPanel(): string { return root.openPanelSurface() }
+    function closePanel(): string { return root.closePanelSurface() }
+    function togglePanel(): string { return root.togglePanelSurface() }
   }
 
   // The first scan is automatic but deliberately late: the shell has a bar to

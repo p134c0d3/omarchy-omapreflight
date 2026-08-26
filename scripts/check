@@ -166,11 +166,12 @@ if (( ${#scan_paths[@]} > 0 )); then
     fail "Process instantiated outside core/CommandJob.qml:"$'\n'"$process_sites"
   fi
 
-  fileview_sites=$(grep -lE '^[[:space:]]*(property[[:space:]]+FileView[[:space:]]+[A-Za-z_]+:[[:space:]]*)?FileView[[:space:]]*\{' "${scan_paths[@]}" || true)
-  if [[ "$fileview_sites" == "$REPO_ROOT/core/FileReadJob.qml" || -z "$fileview_sites" ]]; then
-    pass "FileView is only instantiated in core/FileReadJob.qml"
+  fileview_sites=$(grep -lE '^[[:space:]]*(property[[:space:]]+FileView[[:space:]]+[A-Za-z_]+:[[:space:]]*)?FileView[[:space:]]*\{' "${scan_paths[@]}" | sort || true)
+  fileview_expected=$(printf '%s\n%s\n' "$REPO_ROOT/core/FileReadJob.qml" "$REPO_ROOT/core/FileWriteJob.qml" | sort)
+  if [[ "$fileview_sites" == "$fileview_expected" || -z "$fileview_sites" ]]; then
+    pass "FileView is only instantiated in core/FileReadJob.qml and core/FileWriteJob.qml"
   else
-    fail "FileView instantiated outside core/FileReadJob.qml:"$'\n'"$fileview_sites"
+    fail "FileView instantiated outside the two permitted job files:"$'\n'"$fileview_sites"
   fi
 fi
 

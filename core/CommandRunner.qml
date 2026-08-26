@@ -1,4 +1,5 @@
 import QtQuick
+import "ExecPolicy.js" as ExecPolicy
 
 // The only place in OmaPreflight that starts an external process.
 //
@@ -51,19 +52,12 @@ QtObject {
   readonly property bool busy: _current !== null
   property int queuedCount: 0
 
-  // Binaries that exist to raise privilege. OmaPreflight is read-only and
-  // unprivileged by design; a check that needs root returns SKIPPED and
-  // documents the manual command instead (spec §23.4).
-  readonly property var privilegeBinaries: [
-    "sudo", "sudoedit", "pkexec", "doas", "su", "run0", "machinectl"   // privilege-escalation denylist
-  ]
-
-  // Shell interpreters are refused outright rather than audited. No check in
-  // the catalog needs shell syntax, so allowing one would only create a place
-  // for a future interpolation bug to live (spec §23.1, §23.2).
-  readonly property var shellBinaries: [
-    "sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "busybox", "env", "eval"
-  ]
+  // The privilege and interpreter denylists, the argument rules and the path
+  // rules all live in core/ExecPolicy.js as pure functions, so they can be
+  // unit-tested directly and so FileReader and FileWriter share exactly the
+  // same path logic rather than each carrying a copy.
+  readonly property var privilegeBinaries: ExecPolicy.PRIVILEGE_BINARIES
+  readonly property var shellBinaries: ExecPolicy.SHELL_BINARIES
 
   property var _queue: []
   property var _current: null
@@ -108,95 +102,7 @@ QtObject {
   // "" means acceptable. Anything else is the human-readable reason, which is
   // surfaced to the user as the check's result rather than swallowed.
   function validate(argv, options) {
-    if (!Array.isArray(argv) || argv.length === 0) return "empty command"
-
-    for (var i = 0; i < argv.length; i++) {
-      if (typeof argv[i] !== "string") return "argument " + i + " is not a string"
-      var control = _controlCharacterAt(argv[i])
-      if (control >= 0) {
-        return "argument " + i + " contains a control character (0x" + control.toString(16) + ")"
-      }
-    }
-
-    var binary = argv[0]
-    if (binary.length === 0) return "empty program name"
-    var slash = binary.lastIndexOf("/")
-    var base = slash >= 0 ? binary.substring(slash + 1) : binary
-    if (privilegeBinaries.indexOf(base) >= 0) return "refusing to run privileged helper '" + base + "'"
-    if (shellBinaries.indexOf(base) >= 0) return "refusing to run interpreter '" + base + "'"
-
-    // The program name itself is never allowed to come from outside, so it is
-    // checked here rather than left to the data rules below.
-    if (base.charAt(0) === "-") return "refusing a program name that looks like an option"
-
-    return _validateDataArgs(argv, options || {})
-  }
-
-  // Every externally-sourced argument, checked as data.
-  function _validateDataArgs(argv, options) {
-    var indices = Array.isArray(options.dataArgs) ? options.dataArgs : []
-    var roots = Array.isArray(options.allowedRoots) ? options.allowedRoots : []
-
-    for (var n = 0; n < indices.length; n++) {
-      var index = indices[n]
-      if (typeof index !== "number" || index < 1 || index >= argv.length) {
-        return "declared data argument " + index + " is out of range"
-      }
-
-      var value = argv[index]
-      if (value.length === 0) return "data argument " + index + " is empty"
-
-      // CWE-88. A dash is all it takes; no metacharacter is involved.
-      if (value.charAt(0) === "-") {
-        return "data argument " + index + " starts with '-' and would be read as an option"
-      }
-
-      // Path-shaped data gets the path rules (CWE-22). Relative paths are
-      // refused outright: what they resolve against is the shell's working
-      // directory, which is not something a check should be reasoning about.
-      if (value.indexOf("/") >= 0) {
-        if (value.charAt(0) !== "/") return "data argument " + index + " is a relative path"
-        if (_hasTraversal(value)) return "data argument " + index + " contains a parent traversal"
-        if (roots.length > 0 && !_isUnderRoot(value, roots)) {
-          return "data argument " + index + " is outside the permitted roots"
-        }
-      }
-    }
-    return ""
-  }
-
-  // Returns the offending code point, or -1. Covers the NUL that would
-  // truncate an argument as well as newlines and escapes, which cannot split
-  // argv without a shell but do corrupt the output of whatever reads them.
-  function _controlCharacterAt(value) {
-    for (var i = 0; i < value.length; i++) {
-      var code = value.charCodeAt(i)
-      if (code < 0x20 || code === 0x7f) return code
-    }
-    return -1
-  }
-
-  // Segment-wise, so a directory legitimately named "..config" is not caught
-  // and "/a/../../etc" is.
-  function _hasTraversal(path) {
-    var segments = path.split("/")
-    for (var i = 0; i < segments.length; i++) {
-      if (segments[i] === "..") return true
-    }
-    return false
-  }
-
-  // Prefix matching on a segment boundary: "/home/u/.config/omarchy/plugins"
-  // must not admit "/home/u/.config/omarchy/plugins-evil".
-  function _isUnderRoot(path, roots) {
-    for (var i = 0; i < roots.length; i++) {
-      var root = String(roots[i])
-      if (root.length === 0) continue
-      if (root.charAt(root.length - 1) !== "/") root = root + "/"
-      if (path === root.substring(0, root.length - 1)) return true
-      if (path.indexOf(root) === 0) return true
-    }
-    return false
+    return ExecPolicy.validateArgv(argv, options || {})
   }
 
   // ---- internals -----------------------------------------------------

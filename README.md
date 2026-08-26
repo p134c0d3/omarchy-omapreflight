@@ -81,13 +81,35 @@ o.bind("SUPER, P", "OmaPreflight", "omarchy-shell shell toggle p134c0d3.omaprefl
 The service registers the target `p134c0d3.omapreflight`:
 
 ```bash
-omarchy-shell p134c0d3.omapreflight ping      # -> ok
-omarchy-shell p134c0d3.omapreflight status    # -> JSON summary
-omarchy-shell p134c0d3.omapreflight run       # run the check suite
+omarchy-shell p134c0d3.omapreflight ping         # -> ok
+omarchy-shell p134c0d3.omapreflight status       # -> JSON summary
+omarchy-shell p134c0d3.omapreflight results      # -> JSON array of check results
+omarchy-shell p134c0d3.omapreflight run          # run the check suite
+omarchy-shell p134c0d3.omapreflight cancel       # stop a running scan
+omarchy-shell p134c0d3.omapreflight report       # -> path of a written report
+
+omarchy-shell p134c0d3.omapreflight togglePanel  # the bar quick panel
+omarchy-shell p134c0d3.omapreflight openPanel
+omarchy-shell p134c0d3.omapreflight closePanel
+
+omarchy-shell shell toggle p134c0d3.omapreflight # the full overlay
 ```
 
-The IPC surface is deliberately small. It does not expose arbitrary command
-execution.
+Two things worth knowing. The overlay is what `shell toggle` opens, because the
+manifest declares that kind — so the quick panel has its own methods. And those
+methods live on the service rather than on the widget: one copy of the widget
+exists per screen, so the service routes through the shell's own bar resolver,
+which picks the instance on the focused output.
+
+Bind either to a key in `~/.config/hypr/bindings.lua`:
+
+```lua
+hl.bind({ mods = "SUPER", key = "P", dispatcher = "exec",
+          arg = "omarchy-shell p134c0d3.omapreflight togglePanel" })
+```
+
+The IPC surface is deliberately small. It runs no arbitrary commands, takes no
+arguments, and returns only what a scan already collected.
 
 ## Theming
 
