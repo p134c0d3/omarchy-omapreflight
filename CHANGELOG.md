@@ -42,9 +42,26 @@ Diagnostic engine (Milestone 1) and the security model.
 - `core/ExecPolicy.js` — the execution and path policy as pure functions, shared
   by CommandRunner, FileReader and FileWriter so one implementation of the path
   rules exists rather than three.
-- Test suite: 131 cases across the readiness aggregator, every parser, the
-  sanitizer and the execution policy, run with `scripts/test`. Parser fixtures
-  are real output captured from a live machine.
+- Test suite: 186 cases across the readiness aggregator, every parser, the
+  sanitizer, the execution policy and the baseline document, run with
+  `scripts/test`. Parser fixtures are real output captured from a live machine.
+- **The full v0.1 check catalog — 21 checks.** Added `hyprland.live-bindings`,
+  `.live-monitors`, `.user-config-presence`; `plugins.discovery`,
+  `.third-party-validation`, `.local-changes`; `runtime.failed-user-units`,
+  `.disk-space-root`, `.disk-space-home`; `recovery.snapshot-capability`,
+  `.baseline-present`, `.version-baseline-match`.
+- Baselines (§19): `core/BaselineStore.qml` and `core/Baseline.js`. Metadata
+  only — versions, fingerprints, hashes, sizes, mtimes, never file contents,
+  and the builder enumerates the permitted fields so that stays true. Written
+  atomically and then read back and parsed before being treated as current.
+  Recorded only when asked, from the report window (`B`) or over IPC.
+- Structured facts: checks record machine-readable values alongside the prose
+  they report, and the baseline is built from those rather than from parsing
+  summary text.
+- `runtime.disk-space-*` is the catalog's second blocker: below 2 GiB free is a
+  genuine "do not update", because an update that runs out of space part-way is
+  the most reliable way to end up with a broken system. Thresholds are fixed
+  and documented, and explicitly not a prediction of what an update needs.
 - `docs/security.md` — threat model, trust boundaries, the enforced invariants
   with their CWE mapping, and the residual risks that are *not* mitigated.
 - `SECURITY.md` — private vulnerability reporting and scope.

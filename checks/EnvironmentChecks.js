@@ -100,6 +100,7 @@ var HYPRLAND_PRESENT = {
 
     if (caps.has("hyprland")) {
       var version = caps.hyprlandVersion
+      if (version && version.ok) ctx.fact("hyprland.version", version.version)
       done({
         status: R.STATUS.PASS,
         summary: version && version.ok
@@ -149,6 +150,7 @@ var QUICKSHELL_VERSION = {
       }
 
       var parsed = PacmanQuery.parseOwner(result.stdout)
+      if (parsed.ok) ctx.fact("quickshell.version", parsed.version)
       done({
         status: parsed.ok ? R.STATUS.PASS : R.STATUS.UNKNOWN,
         summary: parsed.ok

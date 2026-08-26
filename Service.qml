@@ -73,6 +73,13 @@ Item {
 
   property Core.CapabilityRegistry capabilities: Core.CapabilityRegistry {}
 
+  property Core.BaselineStore baselineStore: Core.BaselineStore {
+    fileReader: root.fileReader
+    fileWriter: root.fileWriter
+    path: root.stateDir + "/baseline.json"
+    pluginVersion: root.pluginVersion
+  }
+
   property Core.ReportBuilder reportBuilder: Core.ReportBuilder {
     store: root.store
     capabilities: root.capabilities
@@ -88,6 +95,7 @@ Item {
     runner: root.runner
     fileReader: root.fileReader
     capabilities: root.capabilities
+    baseline: root.baselineStore
     store: root.store
     paths: root.paths
     checks: Registry.all()
@@ -152,6 +160,25 @@ Item {
     return target
   }
 
+  // Record the current state as the baseline. Deliberately explicit: nothing
+  // records one on its own, because a baseline captured automatically at the
+  // wrong moment — mid-update, or with a broken config — is worse than no
+  // baseline at all.
+  function saveBaseline(callback) {
+    if (!store.lastCompletedScanId || store.lastCompletedScanId.length === 0) {
+      if (callback) callback({ ok: false, error: "run a scan first" })
+      return ""
+    }
+
+    ensureStateDirs(function () {
+      root.baselineStore.save(root.engine.facts, function (result) {
+        if (!result.ok) root.log("baseline write failed: " + result.error)
+        if (callback) callback(result)
+      })
+    })
+    return baselineStore.path
+  }
+
   // Copying is explicitly user-initiated, from a button. Nothing reaches the
   // clipboard on its own.
   function copyReport() {
@@ -170,8 +197,11 @@ Item {
       if (done) done()
       return
     }
-    runner.run(["mkdir", "-p", "-m", "700", root.reportsDir],
-               { timeoutMs: 4000, dataArgs: [4], allowedRoots: [root.stateHome] },
+    // Both directories are named explicitly. `-m` applies to the directories
+    // mkdir is asked to create, not to the parents `-p` fills in, so naming
+    // only the leaf would leave the state directory itself world-readable.
+    runner.run(["mkdir", "-p", "-m", "700", root.stateDir, root.reportsDir],
+               { timeoutMs: 4000, dataArgs: [4, 5], allowedRoots: [root.stateHome] },
                function (result) {
                  root.stateDirsEnsured = result.ok
                  if (!result.ok && result.blocked) root.log("state directory refused: " + result.blockedReason)
@@ -305,6 +335,13 @@ Item {
     // The bar widget's quick panel, on every screen that has one. Bindable to
     // a hotkey; without this the panel is mouse-only, because `shell toggle`
     // is claimed by the overlay.
+    // Records the current scan as the baseline and returns where it was
+    // written. Never automatic (§19).
+    function baseline(): string {
+      var path = root.saveBaseline(null)
+      return path === "" ? "no-scan" : path
+    }
+
     function openPanel(): string { return root.openPanelSurface() }
     function closePanel(): string { return root.closePanelSurface() }
     function togglePanel(): string { return root.togglePanelSurface() }
@@ -344,6 +381,9 @@ Item {
     root.log("service mounted id=" + String(manifest.id)
       + " version=" + String(manifest.version))
     root.ensureWindowRule(null)
+    // Loaded before the first scan so the recovery checks have something to
+    // compare against on the very first run after a restart.
+    root.baselineStore.load(null)
     initialScan.start()
   }
 

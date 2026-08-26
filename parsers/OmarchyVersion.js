@@ -49,3 +49,42 @@ function components(version) {
 function sameVersion(a, b) {
   return String(a || "") === String(b || "")
 }
+
+// -1 if a < b, 0 if equal, 1 if a > b, and **null when they cannot be
+// meaningfully ordered**.
+//
+// The null case matters more than the others. Version ordering is where
+// diagnostics quietly start lying: given "4.0.1-1" and "4.0.1-rc2" there is a
+// defensible answer, and given a format this parser has never seen there is
+// not. Returning null lets the caller say "different, and I cannot tell which
+// way" instead of guessing — which is the whole point of the UNKNOWN status.
+function compare(a, b) {
+  var left = components(a)
+  var right = components(b)
+  if (left.upstream.length === 0 || right.upstream.length === 0) return null
+  if (left.upstream === right.upstream) {
+    return _compareRelease(left.release, right.release)
+  }
+
+  var length = Math.max(left.parts.length, right.parts.length)
+  for (var i = 0; i < length; i++) {
+    var l = left.parts[i]
+    var r = right.parts[i]
+    if (l === undefined) return -1
+    if (r === undefined) return 1
+    // A non-numeric component ("2rc1", "beta") is where ordering stops being
+    // knowable. Say so rather than falling back on string comparison, which
+    // would confidently put "10" before "9".
+    if (typeof l !== "number" || typeof r !== "number") return null
+    if (l !== r) return l < r ? -1 : 1
+  }
+  return _compareRelease(left.release, right.release)
+}
+
+function _compareRelease(a, b) {
+  var left = parseInt(a, 10)
+  var right = parseInt(b, 10)
+  if (isNaN(left) || isNaN(right)) return a === b ? 0 : null
+  if (left === right) return 0
+  return left < right ? -1 : 1
+}

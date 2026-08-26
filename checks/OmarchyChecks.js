@@ -41,6 +41,7 @@ var VERSION = {
         return
       }
 
+      ctx.fact("omarchy.version", parsed.version)
       done({
         status: R.STATUS.PASS,
         summary: "Omarchy " + parsed.version + ".",
@@ -90,6 +91,7 @@ var CHANNEL = {
         details.push("Non-stable channels receive changes earlier and with less soak time.")
       }
 
+      ctx.fact("omarchy.channel", parsed.channel)
       done({
         status: R.STATUS.PASS,
         summary: "Following the " + parsed.channel + " channel.",
@@ -142,6 +144,12 @@ var SHELL_CONFIG_READABLE = {
         })
         return
       }
+
+      // A change-detection fingerprint, not a digest. shell.json is already in
+      // memory, so this costs nothing; the config files that want a real
+      // sha256 get one from sha256sum instead.
+      ctx.fact("shell.configFingerprint", R.hashString(file.text))
+      ctx.fact("shell.configVersion", parsed.version)
 
       var details = []
       if (parsed.hasBar) {

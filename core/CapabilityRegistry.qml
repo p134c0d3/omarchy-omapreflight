@@ -34,7 +34,11 @@ QtObject {
   // does not pay for it twice.
   readonly property var probes: [
     { key: "omarchyCommands", argv: ["omarchy", "commands", "--json"], timeoutMs: 8000 },
-    { key: "hyprctlVersion", argv: ["hyprctl", "version"], timeoutMs: 3000 }
+    { key: "hyprctlVersion", argv: ["hyprctl", "version"], timeoutMs: 3000 },
+    // Doubles as the runtime.failed-user-units command. Because every probe
+    // goes through the engine's memo, the check that needs this answer later
+    // gets it for free rather than launching systemctl a second time.
+    { key: "systemctlUserFailed", argv: ["systemctl", "--user", "--failed", "--no-legend", "--no-pager"], timeoutMs: 5000 }
   ]
 
   // Routes whose presence maps to a named capability. Kept declarative so the
@@ -127,6 +131,10 @@ QtObject {
       caps[capId] = !!parsedCatalog && OmarchyCommands.isCallable(parsedCatalog, route)
       caps[capId + ".route"] = !!parsedCatalog && OmarchyCommands.hasRoute(parsedCatalog, route)
     }
+
+    // ---- systemd ----------------------------------------------------
+    var systemd = _probeResults["systemctlUserFailed"]
+    caps["systemd.user"] = !!systemd && systemd.ok
 
     // ---- Hyprland ---------------------------------------------------
     var hypr = _probeResults["hyprctlVersion"]

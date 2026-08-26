@@ -2,6 +2,9 @@
 .import "EnvironmentChecks.js" as EnvironmentChecks
 .import "OmarchyChecks.js" as OmarchyChecks
 .import "HyprlandChecks.js" as HyprlandChecks
+.import "PluginChecks.js" as PluginChecks
+.import "RuntimeChecks.js" as RuntimeChecks
+.import "RecoveryChecks.js" as RecoveryChecks
 
 // The catalog, in execution order.
 //
@@ -23,6 +26,9 @@ function all() {
     .concat(EnvironmentChecks.ALL)
     .concat(OmarchyChecks.ALL)
     .concat(HyprlandChecks.ALL)
+    .concat(PluginChecks.ALL)
+    .concat(RuntimeChecks.ALL)
+    .concat(RecoveryChecks.ALL)
 }
 
 function categoryTitle(id) {

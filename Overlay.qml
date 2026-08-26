@@ -141,6 +141,17 @@ Item {
     })
   }
 
+  function saveBaseline() {
+    if (!service || typeof service.saveBaseline !== "function") return
+    root.reportNotice = "Recording baseline…"
+    service.saveBaseline(function (result) {
+      root.reportNotice = result.ok
+        ? "Baseline recorded. Later scans will say what changed since now."
+        : "Could not record a baseline: " + result.error
+      noticeTimer.restart()
+    })
+  }
+
   function copyReport() {
     if (!service || typeof service.copyReport !== "function") return
     var outcome = service.copyReport()
@@ -228,7 +239,11 @@ Item {
     // scrolling". Hyprland gets the final say — it always does — so the list
     // still scrolls if the compositor hands back something shorter.
     implicitWidth: Style.space(940)
-    implicitHeight: Math.min(Style.space(1200), content.naturalHeight)
+    // Generous rather than guessed. A client cannot know which output the
+    // compositor will place it on, so asking for the content height and
+    // letting Hyprland clamp to the monitor beats capping at a number that is
+    // too small on a tall screen and too large on a laptop panel.
+    implicitHeight: Math.min(Style.space(2000), content.naturalHeight)
     minimumSize: Qt.size(Style.space(420), Style.space(260))
 
     // Closing the window with the compositor (or its own close button) has to
@@ -306,6 +321,10 @@ Item {
             root.copyReport()
             event.accepted = true
             break
+          case Qt.Key_B:
+            root.saveBaseline()
+            event.accepted = true
+            break
           }
         }
 
@@ -348,6 +367,17 @@ Item {
               spacing: Style.space(10)
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
+
+              Button {
+                text: "Set baseline"
+                enabled: root.orderedResults.length > 0
+                opacity: enabled ? 1.0 : 0.45
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                bordered: true
+                focusable: true
+                onClicked: root.saveBaseline()
+              }
 
               Button {
                 text: "Copy"
@@ -463,7 +493,7 @@ Item {
 
           Text {
             width: parent.width
-            text: "↑↓ move   ⏎ expand   R rescan   S save   C copy   Esc close"
+            text: "↑↓ move   ⏎ expand   R rescan   S save   C copy   B baseline   Esc close"
             color: Qt.darker(root.foreground, 1.7)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

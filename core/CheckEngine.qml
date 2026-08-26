@@ -24,6 +24,7 @@ QtObject {
   property var runner: null          // CommandRunner
   property var fileReader: null      // FileReader
   property var capabilities: null    // CapabilityRegistry
+  property var baseline: null        // BaselineStore
   property var store: null           // PreflightStore
 
   // Check definitions, in execution order. Plain JS objects from checks/*.js.
@@ -45,6 +46,12 @@ QtObject {
   property bool _cancelRequested: false
   property string _abortReason: ""
   property var _results: []
+  // Structured facts a check chose to record, as opposed to the prose it
+  // reported. Results are for people; facts are what the baseline is built
+  // from and compared against, and deriving one from the other by parsing
+  // summary text would be a bad idea that works right up until someone
+  // improves a sentence.
+  property var facts: ({})
   property var _memo: ({})
   property var _fileMemo: ({})
   property var _pending: ({})
@@ -59,6 +66,7 @@ QtObject {
     _cancelRequested = false
     _abortReason = ""
     _results = []
+    facts = ({})
     _memo = ({})
     _fileMemo = ({})
     _pending = ({})
@@ -75,6 +83,26 @@ QtObject {
     _ceiling.interval = Math.max(10000, root.scanCeilingMs)
     _ceiling.start()
 
+    // The baseline is re-read at the start of every scan rather than once at
+    // mount. The shell is long-lived — a session lasts days — and a baseline
+    // recorded, replaced, or removed in between must be the one the recovery
+    // checks compare against, not whatever was on disk when the plugin loaded.
+    _loadBaseline(function () {
+      root._beginCapabilityPhase()
+    })
+
+    return scanId
+  }
+
+  function _loadBaseline(next) {
+    if (!baseline || typeof baseline.load !== "function") {
+      next()
+      return
+    }
+    baseline.load(function () { next() })
+  }
+
+  function _beginCapabilityPhase() {
     // Capability detection is step zero of the scan, not a separate lifecycle.
     // Its cost is visible in the progress figure for the same reason.
     capabilities.refresh(_exec, function () {
@@ -85,8 +113,6 @@ QtObject {
       root.store.capabilities = root.capabilities.capabilities
       root._runNext()
     })
-
-    return scanId
   }
 
   function cancel(reason) {
@@ -196,6 +222,7 @@ QtObject {
     _ceiling.stop()
 
     store.results = _results
+    store.environment = root.facts
     store.categories = R.groupByCategory(_results)
     store.readiness = R.aggregateReadiness(_results, completed)
     store.scanRunning = false
@@ -220,10 +247,26 @@ QtObject {
       exec: root._exec,
       readFile: root._readFile,
       capabilities: root.capabilities,
+      baseline: root.baseline,
       paths: root.paths,
       scanId: root.scanId,
+      fact: root._recordFact,
+      facts: function () { return root.facts },
       now: function () { return new Date().toISOString() }
     }
+  }
+
+  // Record a structured fact under a dotted path: fact("omarchy.version", "4.0.1-1").
+  // Intermediate objects are created as needed, so a check never has to know
+  // whether it is the first to write into a branch.
+  function _recordFact(path, value) {
+    var segments = String(path).split(".")
+    var node = root.facts
+    for (var i = 0; i < segments.length - 1; i++) {
+      if (!node[segments[i]] || typeof node[segments[i]] !== "object") node[segments[i]] = {}
+      node = node[segments[i]]
+    }
+    node[segments[segments.length - 1]] = value
   }
 
   // Memoized so two checks citing the same command pay for it once, and so

@@ -156,11 +156,14 @@ function unknownResult(def, reason, evidenceList) {
   })
 }
 
-// FNV-1a, 32-bit. Stable across runs for the same finding, which is what makes
-// it useful for de-duplicating a result between scans. Not a security hash and
-// not used as one.
-function fingerprint(result) {
-  var input = [result.id, result.status, result.severity, result.summary].join("|")
+// FNV-1a, 32-bit. Stable across runs for the same input, which is what makes
+// it useful for telling whether something changed between scans.
+//
+// Not a security hash and never used as one: it is not collision-resistant and
+// nothing here depends on it being so. Where a real digest is wanted — the
+// config files in the baseline — the value comes from `sha256sum`.
+function hashString(text) {
+  var input = String(text === undefined || text === null ? "" : text)
   var hash = 0x811c9dc5
   for (var i = 0; i < input.length; i++) {
     hash ^= input.charCodeAt(i) & 0xff
@@ -169,6 +172,10 @@ function fingerprint(result) {
   var hex = hash.toString(16)
   while (hex.length < 8) hex = "0" + hex
   return hex
+}
+
+function fingerprint(result) {
+  return hashString([result.id, result.status, result.severity, result.summary].join("|"))
 }
 
 // ---- aggregation -----------------------------------------------------
