@@ -27,3 +27,24 @@ jobs:
 
       - name: Manifest, safety invariants, structure
         run: ./scripts/check --portable
+
+  tests:
+    # The suite is pure JavaScript by design — everything worth testing lives in
+    # a `.js` module precisely because qmltestrunner cannot load Quickshell's
+    # C++ QML plugin outside a shell process. That makes it runnable on a plain
+    # Ubuntu runner with nothing but Qt's QML tooling.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Qt QML test tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtqml
+
+      - name: Run the test suite
+        run: |
+          QT_BIN=$(dirname "$(command -v qmltestrunner || echo /usr/lib/qt6/bin/qmltestrunner)")
+          QT_BIN="$QT_BIN" QT_QPA_PLATFORM=offscreen ./scripts/test
