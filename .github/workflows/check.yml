@@ -40,11 +40,24 @@ jobs:
           persist-credentials: false
 
       - name: Install Qt QML test tooling
+        # qmltestrunner pulls in QtTest, which pulls in a chain of QtQuick
+        # modules that qt6-declarative-dev-tools does not depend on. Installed
+        # best-effort one at a time so a package that is absent or renamed in a
+        # future Ubuntu image does not take the whole job down before the
+        # runner has had a chance to say what is actually missing.
         run: |
           sudo apt-get update
-          sudo apt-get install -y qt6-declarative-dev-tools qml6-module-qttest \
-                                  qml6-module-qtqml qml6-module-qtquick \
-                                  qml6-module-qtqml-workerscript
+          for pkg in qt6-declarative-dev-tools \
+                     qml6-module-qttest \
+                     qml6-module-qtqml \
+                     qml6-module-qtqml-workerscript \
+                     qml6-module-qtquick \
+                     qml6-module-qtquick-window \
+                     qml6-module-qtquick-templates \
+                     qml6-module-qtquick-controls \
+                     qml6-module-qtquick-layouts; do
+            sudo apt-get install -y "$pkg" || echo "unavailable: $pkg"
+          done
 
       - name: Run the test suite
         run: |
