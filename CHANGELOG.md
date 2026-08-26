@@ -58,6 +58,20 @@ Diagnostic engine (Milestone 1) and the security model.
 - Structured facts: checks record machine-readable values alongside the prose
   they report, and the baseline is built from those rather than from parsing
   summary text.
+- `plugins.third-party-validation` now compares the plugin directories on disk
+  against the plugins the shell actually loaded. The shell drops a plugin with
+  an invalid manifest during discovery, warns once into its log, and carries
+  on — so the plugin vanishes from every user-facing surface with no
+  explanation. Validating only the plugins the CLI reports could never find it:
+  everything on that list has already passed the same validator.
+- `docs/check-catalog.md`, `docs/privacy.md`, `docs/architecture.md`, ADR-002
+  (serial execution and bounded work) and ADR-003 (QML does I/O, JavaScript
+  makes the decisions). `scripts/check` fails if the documented catalog and the
+  code disagree in either direction.
+- `scripts/demo`, which injects one genuinely broken plugin so the FAIL and
+  WARN paths can be seen for real, and `scripts/demo --clean` to remove it.
+  There is no demo mode inside the plugin and no way to make it report
+  something it did not observe.
 - `runtime.disk-space-*` is the catalog's second blocker: below 2 GiB free is a
   genuine "do not update", because an update that runs out of space part-way is
   the most reliable way to end up with a broken system. Thresholds are fixed

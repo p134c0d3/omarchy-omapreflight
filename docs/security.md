@@ -123,6 +123,13 @@ config directory, the Hyprland config directory, and OmaPreflight's own state
 directory. There is no recursive mode and no API to add one at runtime. `$HOME`
 is never walked.
 
+One directory is *listed* rather than read: `~/.config/omarchy/plugins/`, to
+find plugins the shell silently refused. The listing is one level deep and the
+bound is in the argv itself — `find <dir> -mindepth 1 -maxdepth 1 -type d` — so
+"this is not a recursive scan" is visible in the command rather than resting on
+a flag the reader has to know the meaning of. Names that come back are gated by
+the plugin-id pattern before becoming a path.
+
 ### 6. Bounded work — CWE-770
 
 Unbounded resource use inside a shell process is a desktop that stops

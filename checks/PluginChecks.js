@@ -94,87 +94,186 @@ var THIRD_PARTY_VALIDATION = {
   id: "plugins.third-party-validation",
   title: "Third-party plugin validity",
   category: "plugins",
-  description: "Runs the official plugin validator against each third-party "
-    + "plugin. A plugin that fails validation is one the shell may refuse to "
-    + "load after an update.",
+  description: "Compares the plugin directories on disk against the plugins "
+    + "the shell actually loaded, and validates anything it finds missing.",
   requiredCapabilities: ["omarchy.pluginList", "omarchy.pluginValidate"],
   defaultSeverity: "error",
   // Generous: each plugin gets its own 15 s budget (§23.6) and they run one at
   // a time, so the check's own watchdog has to allow for the whole sequence.
   timeoutMs: 60000,
   run: function (ctx, done) {
-    _withThirdPartyPlugins(ctx, done, function (plugins, pluginsDir, notes) {
-      if (plugins.length === 0) {
+    var pluginsDir = String(ctx.paths.pluginsDir || "")
+    if (pluginsDir.length === 0) {
+      done(R.skippedResult(THIRD_PARTY_VALIDATION, "No plugin directory is known."))
+      return
+    }
+
+    ctx.exec(["omarchy", "plugin", "list", "--json"], { timeoutMs: 8000 }, function (listResult) {
+      if (!listResult.ok) {
         done({
-          status: R.STATUS.PASS,
-          summary: "No third-party plugins to validate.",
-          details: notes
+          status: R.STATUS.UNKNOWN,
+          summary: "Could not read the plugin list.",
+          evidence: [R.evidence("command", "omarchy plugin list --json", "exit " + listResult.exitCode)]
         })
         return
       }
 
-      var failures = []
-      var validated = 0
-      var skipped = []
+      var parsed = PluginList.parse(listResult.stdout)
+      if (!parsed.ok) {
+        done({
+          status: R.STATUS.UNKNOWN,
+          summary: "The plugin list could not be interpreted: " + parsed.error + "."
+        })
+        return
+      }
 
-      // Sequential, and one broken plugin never stops the rest (§17.4).
-      _forEachSeries(plugins, function (plugin, next) {
-        var directory = PluginList.directoryFor(pluginsDir, plugin.id)
-        if (directory === "") {
-          skipped.push(plugin.id + " (id is not a usable directory name)")
+      var known = {}
+      for (var k = 0; k < parsed.plugins.length; k++) known[parsed.plugins[k].id] = true
+
+      // A single level, bounded explicitly by -mindepth/-maxdepth. The argv
+      // itself is the proof that this is not a recursive scan (§33.6), which
+      // is why `find` is used rather than something that would need a flag
+      // read carefully to know the same thing.
+      ctx.exec(["find", pluginsDir, "-mindepth", "1", "-maxdepth", "1", "-type", "d", "-printf", "%f\\n"],
+        { timeoutMs: 5000, dataArgs: [1], allowedRoots: [pluginsDir] },
+        function (findResult) {
+          _validateAll(ctx, done, pluginsDir, parsed, known,
+                       findResult.ok ? Json.nonEmptyLines(findResult.stdout) : null,
+                       findResult.ok ? "" : "Could not list the plugin directory, so only "
+                         + "plugins the shell already loaded were checked.")
+        })
+    })
+  }
+}
+
+// The interesting half of this check.
+//
+// `omarchy plugin list --json` only reports plugins that already passed
+// validation: PluginRegistry drops an invalid manifest during discovery, warns
+// once into the shell log, and carries on. So a plugin can be installed,
+// enabled in the past, and completely absent from every user-facing surface —
+// with no indication anywhere the user is looking.
+//
+// Validating the plugins the CLI *does* list would therefore almost never find
+// anything: they have already passed the same validator. Comparing the
+// directories on disk against that list is what surfaces the failure that
+// actually happens.
+function _validateAll(ctx, done, pluginsDir, parsed, known, onDisk, listNote) {
+  var notes = []
+  if (listNote.length > 0) notes.push(listNote)
+
+  var unloaded = []
+  var unusable = []
+
+  if (onDisk !== null) {
+    for (var i = 0; i < onDisk.length; i++) {
+      var name = onDisk[i]
+      if (known[name]) continue
+      if (!PluginList.isSafeId(name)) {
+        // Also where a directory name containing a newline ends up, since it
+        // arrives here as fragments. Reported rather than silently dropped.
+        unusable.push(name)
+        continue
+      }
+      unloaded.push(name)
+    }
+  }
+
+  // Listed third-party plugins are still validated. It costs one command each
+  // and it catches the case where the CLI validator and the shell's own
+  // discovery ever disagree.
+  var listed = PluginList.thirdParty(parsed)
+  var targets = unloaded.slice()
+  for (var t = 0; t < listed.length; t++) targets.push(listed[t].id)
+
+  if (targets.length > MAX_PLUGINS) {
+    notes.push("Only the first " + MAX_PLUGINS + " of " + targets.length
+      + " plugin directories were validated, to stay inside the scan's time budget.")
+    targets = targets.slice(0, MAX_PLUGINS)
+  }
+
+  var failures = []
+  var validated = 0
+
+  _forEachSeries(targets, function (id, next) {
+    var directory = PluginList.directoryFor(pluginsDir, id)
+    if (directory === "") {
+      next()
+      return
+    }
+
+    // No `--` here: `omarchy plugin validate` does not accept one — it reads it
+    // as the folder to validate and fails with "plugin folder not found: --".
+    // Verified on Omarchy 4.0.1. This is precisely why the runner's
+    // leading-dash rule is the primary defence and a separator is only ever a
+    // second layer where a program happens to support it.
+    ctx.exec(["omarchy", "plugin", "validate", directory],
+      { timeoutMs: 15000, dataArgs: [3], allowedRoots: [pluginsDir] },
+      function (result) {
+        if (result.blocked) {
+          notes.push("Not checked: " + id + " (" + result.blockedReason + ")")
           next()
           return
         }
-
-        // No `--` here: `omarchy plugin validate` does not accept one — it
-        // reads it as the folder to validate and fails with "plugin folder not
-        // found: --". Verified on Omarchy 4.0.1. This is precisely why the
-        // runner's leading-dash rule is the primary defence and the separator
-        // only ever a second layer where a program happens to support it.
-        ctx.exec(["omarchy", "plugin", "validate", directory],
-          { timeoutMs: 15000, dataArgs: [3], allowedRoots: [pluginsDir] },
-          function (result) {
-            if (result.blocked) {
-              skipped.push(plugin.id + " (" + result.blockedReason + ")")
-              next()
-              return
-            }
-            validated++
-            if (!result.ok) {
-              var reason = String(result.stderr || result.stdout || "").trim()
-              failures.push(plugin.id + " — " + (reason.length > 0
-                ? Json.clip(reason, 2, 200)
-                : (result.timedOut ? "validation timed out" : "exit " + result.exitCode)))
-            }
-            next()
+        validated++
+        if (!result.ok) {
+          var reason = String(result.stderr || result.stdout || "").trim()
+          failures.push({
+            id: id,
+            loaded: known[id] === true,
+            reason: reason.length > 0
+              ? Json.clip(reason, 2, 200)
+              : (result.timedOut ? "validation timed out" : "exit " + result.exitCode)
           })
-      }, function () {
-        var details = notes.concat(failures)
-        for (var s = 0; s < skipped.length; s++) details.push("Not checked: " + skipped[s])
-
-        if (failures.length === 0) {
-          done({
-            status: R.STATUS.PASS,
-            summary: validated === 1
-              ? "1 third-party plugin validates cleanly."
-              : validated + " third-party plugins validate cleanly.",
-            details: details
-          })
-          return
         }
-
-        done({
-          status: R.STATUS.FAIL,
-          summary: failures.length === 1
-            ? "1 third-party plugin fails validation."
-            : failures.length + " third-party plugins fail validation.",
-          details: details,
-          remediation: "Run `omarchy plugin validate ~/.config/omarchy/plugins/<id>` "
-            + "to see the full output, and consider disabling the plugin before updating."
-        })
+        next()
       })
+  }, function () {
+    var details = []
+    var silent = 0
+
+    for (var f = 0; f < failures.length; f++) {
+      var failure = failures[f]
+      if (!failure.loaded) silent++
+      details.push(failure.id + (failure.loaded ? "" : " (installed but not loaded)")
+        + " — " + failure.reason)
+    }
+
+    for (var u = 0; u < unusable.length; u++) {
+      details.push("Ignored: a directory name that is not a usable plugin id")
+    }
+
+    details = details.concat(notes)
+
+    if (failures.length === 0) {
+      done({
+        status: R.STATUS.PASS,
+        summary: validated === 1
+          ? "1 plugin directory validates cleanly."
+          : validated + " plugin directories validate cleanly.",
+        details: details
+      })
+      return
+    }
+
+    done({
+      status: R.STATUS.FAIL,
+      summary: silent > 0
+        ? (silent === 1
+            ? "1 installed plugin is invalid and is being silently ignored by the shell."
+            : silent + " installed plugins are invalid and are being silently ignored by the shell.")
+        : (failures.length === 1
+            ? "1 plugin fails validation."
+            : failures.length + " plugins fail validation."),
+      details: details,
+      remediation: silent > 0
+        ? "The shell drops a plugin with an invalid manifest during discovery and only "
+          + "warns once in its log, so it disappears from every menu without explanation. "
+          + "Fix the manifest or remove the directory."
+        : "Run `omarchy plugin validate ~/.config/omarchy/plugins/<id>` for the full output, "
+          + "and consider disabling the plugin before updating."
     })
-  }
+  })
 }
 
 var LOCAL_CHANGES = {

@@ -130,10 +130,30 @@ Reads the plugin inventory. Reports totals by provenance and enabled state.
 *Runs:* `omarchy plugin list --json`. *Requires:* `omarchy.pluginList`.
 
 ### `plugins.third-party-validation`
-Runs the official validator against each third-party plugin, sequentially. One
-broken plugin never stops the rest. A failure is a `FAIL`: a plugin that does
-not validate is one the shell may refuse to load after an update.
-*Runs:* `omarchy plugin validate <dir>` per plugin, 15 s each.
+Compares the plugin directories on disk against the plugins the shell actually
+loaded, then validates both what is missing from that list and what is on it.
+
+This is the check most likely to tell you something you did not know. The
+shell's `PluginRegistry` drops a plugin with an invalid manifest during
+discovery, warns **once** into the shell log, and carries on — so the plugin
+disappears from every menu, every list, and the plugin manager itself, with no
+explanation anywhere the user is looking. Validating only the plugins the CLI
+reports would never find it: everything on that list has already passed the
+same validator.
+
+Two distinct failures, both reported as `FAIL`:
+
+- **installed but not loaded** — a directory on disk that the shell refused.
+  The result says so explicitly, because "your plugin is silently gone" is a
+  different problem from "your plugin has a bug";
+- **listed but invalid** — the manifest is well formed enough for discovery,
+  but the validator rejects it. A missing entry-point file lands here.
+
+One broken plugin never stops the rest. Directory names that are not usable
+plugin ids are reported as ignored rather than silently skipped.
+*Runs:* `find <plugins> -mindepth 1 -maxdepth 1 -type d -printf '%f\n'` — a
+single level, bounded in the argv itself — then `omarchy plugin validate <dir>`
+per plugin, 15 s each.
 *Requires:* `omarchy.pluginList`, `omarchy.pluginValidate`.
 
 ### `plugins.local-changes`

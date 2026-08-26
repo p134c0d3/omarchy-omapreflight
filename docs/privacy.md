@@ -23,7 +23,8 @@ record a baseline or save a report.
 | Whether six named Hyprland config files exist, and their size, mtime and SHA-256 | `stat`, `sha256sum` |
 | Whether `shell.json` parses, its schema version, bar layout size, and a change fingerprint | reading `~/.config/omarchy/shell.json` |
 | Installed plugin ids, names, kinds, enabled state, first-party flag | `omarchy plugin list --json` |
-| Whether each third-party plugin validates | `omarchy plugin validate <dir>` |
+| The names of the directories directly inside `~/.config/omarchy/plugins/` | `find <plugins> -mindepth 1 -maxdepth 1 -type d` — one level, never recursive |
+| Whether each plugin validates | `omarchy plugin validate <dir>` |
 | Uncommitted-change counts and commit ids in plugin checkouts | `git -C <dir> status`, `git -C <dir> rev-parse HEAD` |
 | Names of failed systemd user units | `systemctl --user --failed` |
 | Free space and mount points for `/` and your home | `df -Pk` |

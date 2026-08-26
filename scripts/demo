@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Inject a safe, reversible fault so the non-passing paths can be seen for real.
+#
+#   scripts/demo            inject and scan
+#   scripts/demo --clean    remove everything it created
+#
+# Why this exists: on a healthy machine every check passes, which means the
+# FAIL and WARN rendering, the worst-first ordering and the readiness verdict
+# are never exercised — and a screenshot of "everything is fine" tells a
+# prospective user nothing.
+#
+# What it does NOT do: fake results. There is no demo mode inside the plugin
+# and no way to make it report something it did not observe. A diagnostic tool
+# that can be told to lie is not one worth trusting. Instead this creates a
+# genuinely broken plugin on disk and lets the real checks find it.
+#
+# Everything it creates lives in one directory and is removed by --clean.
+
+set -euo pipefail
+
+PLUGIN_ID="p134c0d3.omapreflight"
+PLUGINS_DIR="$HOME/.config/omarchy/plugins"
+DEMO_DIR="$PLUGINS_DIR/demo.broken"
+
+note() { printf '\033[1m==>\033[0m %s\n' "$*"; }
+
+if [[ ${1:-} == --clean ]]; then
+  if [[ -d "$DEMO_DIR" ]]; then
+    note "Removing $DEMO_DIR"
+    rm -rf -- "$DEMO_DIR"
+  else
+    note "Nothing to remove"
+  fi
+  omarchy-shell "$PLUGIN_ID" run >/dev/null 2>&1 || true
+  note "Rescanning"
+  exit 0
+fi
+
+note "Creating a deliberately invalid plugin at $DEMO_DIR"
+note "Undo with: scripts/demo --clean"
+mkdir -p "$DEMO_DIR"
+
+# Manifest-invalid, which is the interesting failure. PluginRegistry drops a
+# plugin like this during discovery, warns once into the shell log, and carries
+# on — so it vanishes from every user-facing surface with no explanation. That
+# silent case is what plugins.third-party-validation exists to surface, and it
+# is only findable by comparing the directories on disk against the plugin list.
+#
+# For the other variant — a valid manifest whose entry point file is missing —
+# add "name": "Demo broken plugin" below. That one *is* listed, and fails the
+# CLI validator instead.
+cat > "$DEMO_DIR/manifest.json" <<'JSON'
+{
+  "schemaVersion": 1,
+  "id": "demo.broken",
+  "version": "0.0.1",
+  "author": "OmaPreflight demo",
+  "license": "MIT",
+  "description": "Deliberately invalid: the required 'name' field is missing.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "Missing.qml" }
+}
+JSON
+
+note "Scanning"
+omarchy-shell "$PLUGIN_ID" run >/dev/null
+
+for _ in $(seq 1 30); do
+  if [[ "$(omarchy-shell "$PLUGIN_ID" status 2>/dev/null | jq -r .scanRunning)" == "false" ]]; then
+    break
+  fi
+  sleep 1
+done
+
+omarchy-shell "$PLUGIN_ID" results \
+  | jq -r '.[] | select(.status != "pass")
+           | "\(.status | ascii_upcase)  \(.id)\n    \(.summary)"'
+
+echo
+note "Open the report window to see it rendered:"
+echo "    omarchy-shell shell summon $PLUGIN_ID"
+echo
+note "When you are done:  scripts/demo --clean"
