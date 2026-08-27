@@ -40,8 +40,12 @@ enforces the ones a machine can.
   `dataArgs`, with `allowedRoots` when it is a path. A value that starts with
   `-` becomes an option, and that is all argument injection needs.
 - **`Process` is only ever instantiated in `core/CommandJob.qml`, and `FileView`
-  only in `core/FileReadJob.qml`.** Everything else goes through
+  only in `core/FileWriteJob.qml`.** Everything else goes through
   `CommandRunner` / `FileReader`. This is checked structurally.
+- **Never read a file with `FileView`.** Reads go through `FileReader`, which
+  runs `stat` for the type and size and then `dd` with `O_NOFOLLOW`,
+  `O_NONBLOCK` and a byte ceiling. An allowlisted path can be a symlink, a
+  FIFO, or a gigabyte; a path allowlist cannot see any of that (ADR-006).
 - Never evaluate a string as code — no `eval`, no `new Function`, no
   `Qt.createQmlObject`, no `Qt.include`.
 - Never mutate user configuration. The single exception is the named, runtime,

@@ -34,8 +34,11 @@ var SHELL_BINARIES = [
 // "" means acceptable. Anything else is the human-readable reason, which is
 // surfaced to the user as a check result rather than swallowed.
 //
-// `options.dataArgs` lists the indices of arguments that came from outside the
-// plugin; `options.allowedRoots` bounds any of those that are paths.
+// `options.dataArgs` lists the arguments that came from outside the plugin;
+// `options.allowedRoots` bounds any of those that are paths. An entry is
+// either an index, or `{ index, prefix }` for the handful of programs whose
+// only way to name a file is inside an argument — `dd if=<path>`. The prefix
+// is always a literal the plugin authored; only what follows it is data.
 function validateArgv(argv, options) {
   if (!Array.isArray(argv) || argv.length === 0) return "empty command"
 
@@ -67,12 +70,33 @@ function validateDataArgs(argv, options) {
   var roots = options && Array.isArray(options.allowedRoots) ? options.allowedRoots : []
 
   for (var n = 0; n < indices.length; n++) {
-    var index = indices[n]
+    var declaration = indices[n]
+    var index = declaration
+    var prefix = ""
+
+    // `{ index, prefix }`. Splitting the argument here rather than at the call
+    // site means the prefix stays visible to a reviewer reading the argv, and
+    // the data half still goes through every rule below unchanged.
+    if (declaration !== null && typeof declaration === "object") {
+      index = declaration.index
+      prefix = typeof declaration.prefix === "string" ? declaration.prefix : ""
+    }
+
     if (typeof index !== "number" || index < 1 || index >= argv.length) {
       return "declared data argument " + index + " is out of range"
     }
 
     var value = argv[index]
+    if (prefix.length > 0) {
+      // A declared prefix that is not actually there means the argv and its
+      // declaration have drifted apart, which is exactly the situation where
+      // guessing would be worst.
+      if (value.indexOf(prefix) !== 0) {
+        return "data argument " + index + " does not start with its declared '" + prefix + "' prefix"
+      }
+      value = value.substring(prefix.length)
+    }
+
     if (value.length === 0) return "data argument " + index + " is empty"
 
     // CWE-88. A leading dash is all it takes; no metacharacter is involved,

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "p134c0d3.omapreflight",
   "name": "OmaPreflight",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "p134c0d3",
   "license": "MIT",
   "description": "Omarchy-aware preflight diagnostics and change intelligence. Establishes a known state before an update, detects high-confidence problems, and explains recovery-relevant differences — locally, read-only, with no telemetry.",

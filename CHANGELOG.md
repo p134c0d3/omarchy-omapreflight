@@ -4,6 +4,46 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-08-26
+
+A security fix from the marketplace review of the 0.1.0 submission
+([#2558](https://github.com/HANCORE-linux/omarchy-plugin-marketplace/issues/2558)).
+
+### Fixed
+
+- **File reads are opened no-follow, type-checked and byte-bounded.** The read
+  path used Quickshell's `FileView`, whose safety rested entirely on the path
+  allowlist — and an allowlist checks a *name*, not what is at the name. An
+  allowlisted path that had been replaced with a symlink was followed, one
+  replaced with a FIFO never completed its read, and an oversized file was
+  loaded whole into the shell process.
+
+  Reads now go through the same hardened command path as everything else:
+  `stat` (without `-L`) settles the file's type and size, then `dd` re-opens it
+  with `O_NOFOLLOW`, `O_NONBLOCK` and a 256 KiB byte ceiling. The type check is
+  what produces the message the user reads; the open flags are what make it
+  non-bypassable if the path is swapped in between. `core/FileReadJob.qml` is
+  gone, and `FileView` now appears only on the write path. Reasoning:
+  [ADR-006](docs/adr/ADR-006-reads-go-through-the-command-path.md).
+
+### Changed
+
+- The read allowlist no longer includes `~/.config/hypr/`. Nothing read from
+  it — those files are only ever measured, size and hash, never contents — so
+  it was wider than the check catalog needed.
+- `ExecPolicy` data arguments may be declared as `{ index, prefix }`, for the
+  one program whose only way to name a file is inside an argument (`dd if=…`).
+  The declared prefix is stripped and every existing path rule applies to what
+  follows, so `if=-rf` is refused rather than read as ordinary data.
+- `scripts/check` asserts the new invariants: `FileView` only in
+  `core/FileWriteJob.qml`, the read command built only in `core/ReadPolicy.js`,
+  and the open flags themselves present.
+
+### Added
+
+- `core/ReadPolicy.js` and `tests/tst_ReadPolicy.qml` — the read policy as pure
+  functions, and 23 tests that are its specification.
+
 ## [0.1.0] — 2026-08-25
 
 First release. OmaPreflight answers "what would break if I update?" by asking

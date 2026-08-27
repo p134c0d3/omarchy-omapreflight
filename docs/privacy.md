@@ -21,7 +21,7 @@ record a baseline or save a report.
 | Monitor names, resolutions, refresh rates, scale | `hyprctl monitors -j` |
 | Hyprland config errors, if any | `hyprctl configerrors` |
 | Whether six named Hyprland config files exist, and their size, mtime and SHA-256 | `stat`, `sha256sum` |
-| Whether `shell.json` parses, its schema version, bar layout size, and a change fingerprint | reading `~/.config/omarchy/shell.json` |
+| Whether `shell.json` parses, its schema version, bar layout size, and a change fingerprint | reading `~/.config/omarchy/shell.json` — `stat` for its type and size, then a no-follow `dd` bounded to 256 KiB |
 | Installed plugin ids, names, kinds, enabled state, first-party flag | `omarchy plugin list --json` |
 | The names of the directories directly inside `~/.config/omarchy/plugins/` | `find <plugins> -mindepth 1 -maxdepth 1 -type d` — one level, never recursive |
 | Whether each plugin validates | `omarchy plugin validate <dir>` |
@@ -116,6 +116,7 @@ None of the above requires trust:
 grep -rn "dataArgs" checks/          # every point external input reaches a process
 grep -rn "ctx.exec" checks/          # every command the catalog runs
 grep -rn "readFile\|allowedPrefixes" # every file it may read
+cat core/ReadPolicy.js               # how a read is opened, and what it refuses
 scripts/check                        # fails if a network call or a shell appears
 ```
 

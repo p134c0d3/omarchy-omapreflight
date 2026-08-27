@@ -16,7 +16,7 @@ the evidence layer around them.
 its evidence, and the bar widget's quick panel. Every colour is a theme token,
 so it will look like whatever theme you have applied.*
 
-> **Status: 0.1.0.** Twenty-one checks across environment, Omarchy, Hyprland,
+> **Status: 0.1.1.** Twenty-one checks across environment, Omarchy, Hyprland,
 > plugins, runtime and recovery; sanitized reports; baselines. Verified on
 > Omarchy 4.0.1 / Quickshell 0.3.1 / Hyprland 0.56.2. See the
 > [changelog](CHANGELOG.md) for what is in it and what is deliberately not.
@@ -66,7 +66,7 @@ nothing and installs nothing.
 | `systemctl` | failed user services |
 | `pacman` | the Quickshell version |
 | `git` | local status inside plugin checkouts — never a fetch |
-| `df`, `find`, `stat`, `sha256sum`, `findmnt`, `mkdir` | free space, config metadata, plugin directories |
+| `df`, `find`, `stat`, `dd`, `sha256sum`, `findmnt`, `mkdir` | free space, config metadata, bounded no-follow file reads, plugin directories |
 
 Anything missing degrades one check to `SKIPPED` or `UNKNOWN` with the reason
 shown. Nothing here is a hard dependency, and there are no bundled binaries and
@@ -194,7 +194,7 @@ Stated plainly, because you are running it unsandboxed:
 | Behaviour | Detail |
 |---|---|
 | **Commands run** | Read-only diagnostics only: `omarchy`, `hyprctl`, `systemctl --user`, `df`, `git status` inside plugin checkouts. Never `sudo`. Never an interactive command. |
-| **Files read** | `~/.config/omarchy/shell.json`, approved `~/.config/hypr/*.lua` config files (size/hash/mtime only), plugin manifests. It never recursively scans `$HOME`. |
+| **Files read** | Two, for content: `~/.config/omarchy/shell.json` and OmaPreflight's own baseline. Each is opened no-follow, checked to be a regular file, and capped at 256 KiB. Approved `~/.config/hypr/*.lua` files are *measured* only — size, hash, mtime, never contents — as are plugin manifests. It never recursively scans `$HOME`. |
 | **Files written** | Only `${XDG_STATE_HOME:-~/.local/state}/omapreflight/` — state, baseline, and reports you ask for. |
 | **Network** | None. |
 | **Compositor** | One runtime call: a named Hyprland window rule so the report window opens floating and centred. Scoped to this plugin's own window by class and title, never written to a file, gone when the compositor restarts. This is the only thing the plugin does that is not a read. |
@@ -213,6 +213,11 @@ Those are not promises, they are invariants with enforcement behind them:
   traversal-free, and inside an explicit root;
 - exactly one file may start a process and exactly one may read a file, so the
   validation cannot be routed around;
+- a read does not trust the path allowlist to say what is at a path: `stat`
+  settles the file's type and size first, and the read itself is a `dd` opened
+  with `O_NOFOLLOW` and `O_NONBLOCK` and bounded to 256 KiB, so a symlink, a
+  FIFO or an oversized file at an approved path is refused by the kernel rather
+  than followed, waited on, or swallowed;
 - every command has a timeout and capped output, every check has a watchdog,
   and the whole scan has a ceiling.
 

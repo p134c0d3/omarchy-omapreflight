@@ -166,12 +166,35 @@ if (( ${#scan_paths[@]} > 0 )); then
     fail "Process instantiated outside core/CommandJob.qml:"$'\n'"$process_sites"
   fi
 
+  # Writes are the only remaining FileView. Reads went through it until a
+  # marketplace security review; they now use the command path, because FileView
+  # offers no open flags, no file-type check and no size cap (docs/security.md
+  # §5).
   fileview_sites=$(grep -lE '^[[:space:]]*(property[[:space:]]+FileView[[:space:]]+[A-Za-z_]+:[[:space:]]*)?FileView[[:space:]]*\{' "${scan_paths[@]}" | sort || true)
-  fileview_expected=$(printf '%s\n%s\n' "$REPO_ROOT/core/FileReadJob.qml" "$REPO_ROOT/core/FileWriteJob.qml" | sort)
-  if [[ "$fileview_sites" == "$fileview_expected" || -z "$fileview_sites" ]]; then
-    pass "FileView is only instantiated in core/FileReadJob.qml and core/FileWriteJob.qml"
+  if [[ "$fileview_sites" == "$REPO_ROOT/core/FileWriteJob.qml" || -z "$fileview_sites" ]]; then
+    pass "FileView is only instantiated in core/FileWriteJob.qml"
   else
-    fail "FileView instantiated outside the two permitted job files:"$'\n'"$fileview_sites"
+    fail "FileView instantiated outside core/FileWriteJob.qml:"$'\n'"$fileview_sites"
+  fi
+
+  # The read path only means anything if every read goes through it. `dd` is
+  # how a file's contents are obtained, so it must be built in one place, where
+  # the O_NOFOLLOW / O_NONBLOCK / byte-ceiling flags live together. Matched in
+  # argv position: an occurrence of "dd" in a message is not an invocation.
+  dd_sites=$(grep -lE '"dd"[[:space:]]*,' "${scan_paths[@]}" | sort || true)
+  if [[ "$dd_sites" == "$REPO_ROOT/core/ReadPolicy.js" || -z "$dd_sites" ]]; then
+    pass "the file-read command is only built in core/ReadPolicy.js"
+  else
+    fail "dd invoked outside core/ReadPolicy.js:"$'\n'"$dd_sites"
+  fi
+
+  # A read that follows symlinks is the finding this path exists to close, so
+  # the flags are asserted rather than assumed.
+  if grep -q 'iflag=nofollow,nonblock,fullblock,count_bytes' "$REPO_ROOT/core/ReadPolicy.js" \
+     && grep -q 'stat", "-c", "%F|%s' "$REPO_ROOT/core/ReadPolicy.js"; then
+    pass "reads are no-follow, non-blocking and byte-bounded, over a stat-checked type"
+  else
+    fail "core/ReadPolicy.js no longer opens reads with the documented flags"
   fi
 fi
 

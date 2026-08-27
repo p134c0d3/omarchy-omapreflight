@@ -21,8 +21,9 @@ How OmaPreflight is put together, and why each piece is where it is.
                                       ▼                       CommandJob
                               CapabilityRegistry              one process,
                               BaselineStore                   guaranteed to end
-                              FileReader / FileWriter
-                                      │
+                              FileWriter
+                              FileReader ──► back through CommandRunner:
+                                      │       stat, then no-follow bounded dd
                                       │ runs
                                       ▼
                               checks/*.js  ──uses──►  parsers/*.js
@@ -61,13 +62,20 @@ The division to keep: **QML does I/O and lifetime; JavaScript does decisions.**
 
 ### One place starts a process, one place reads a file, one place writes
 
-`Process` may only be instantiated in `core/CommandJob.qml`. `FileView` only in
-`core/FileReadJob.qml` and `core/FileWriteJob.qml`. `scripts/check` fails the
-build if a second site appears.
+`Process` may only be instantiated in `core/CommandJob.qml`, and `FileView`
+only in `core/FileWriteJob.qml`. `scripts/check` fails the build if a second
+site appears.
 
 This is what makes the validation in `core/ExecPolicy.js` mean anything. A rule
 that can be bypassed by declaring a `Process` elsewhere is documentation, not
 enforcement. See [security.md](security.md).
+
+Reads have no `FileView` at all. `FileReader` goes through the command path —
+`stat` for the file's type and size, then `dd` with `O_NOFOLLOW`, `O_NONBLOCK`
+and a byte ceiling — because `FileView` offers no open flags, no type check and
+no size cap, and an allowlist of names cannot promise anything about what is at
+a name. The policy and the argv live in `core/ReadPolicy.js`;
+[ADR-006](adr/ADR-006-reads-go-through-the-command-path.md) is the reasoning.
 
 ### Execution is serial
 

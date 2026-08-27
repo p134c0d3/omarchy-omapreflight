@@ -39,7 +39,7 @@ Four kinds of input cross into the plugin. Each is treated as untrusted.
 | Source | Why it is untrusted | Handled by |
 |---|---|---|
 | **Command output** — `omarchy`, `hyprctl`, `pacman`, `systemctl`, `df`, `git` | Another program's stdout is data, and a future version can change its shape without warning | `parsers/*.js`, all parsing behind `parsers/Json.js` |
-| **File contents** — `shell.json`, Omarchy config files | User-editable, and may be malformed or mid-write | `core/FileReader.qml` + parsers |
+| **File contents** — `shell.json`, the plugin's own baseline | User-editable, and may be malformed, mid-write, or not a regular file at all | `core/FileReader.qml` + `core/ReadPolicy.js` + parsers |
 | **Names and paths from disk** — plugin ids, plugin directories | Anyone who can create a directory chooses its name | `core/CommandRunner.qml` data-argument rules |
 | **IPC calls** — `omarchy-shell p134c0d3.omapreflight …` | Any process running as the user can call it | `Service.qml` — the surface is read-only and takes no arguments |
 
@@ -118,10 +118,13 @@ the capability unavailable.
 
 ### 5. Reads are narrow and never recursive — CWE-22
 
-`FileReader` carries an explicit allowlist of directory prefixes — the Omarchy
-config directory, the Hyprland config directory, and OmaPreflight's own state
-directory. There is no recursive mode and no API to add one at runtime. `$HOME`
-is never walked.
+`FileReader` carries an explicit allowlist of directory prefixes: the Omarchy
+config directory and OmaPreflight's own state directory. There is no recursive
+mode and no API to add one at runtime. `$HOME` is never walked. Two files are
+ever read for content — `~/.config/omarchy/shell.json` and the plugin's own
+`baseline.json`. The Hyprland config directory is deliberately *not* on the
+list: those files are only measured (`stat`, `sha256sum` — size and hash, never
+contents, §17.3), so read access to them would be wider than the catalog needs.
 
 One directory is *listed* rather than read: `~/.config/omarchy/plugins/`, to
 find plugins the shell silently refused. The listing is one level deep and the
@@ -129,6 +132,49 @@ bound is in the argv itself — `find <dir> -mindepth 1 -maxdepth 1 -type d` —
 "this is not a recursive scan" is visible in the command rather than resting on
 a flag the reader has to know the meaning of. Names that come back are gated by
 the plugin-id pattern before becoming a path.
+
+### 5a. A read is opened no-follow, type-checked and byte-bounded — CWE-59, CWE-770
+
+An allowlist of *names* cannot say what is at a name. A path inside a directory
+the user owns can be replaced with a symlink to `~/.ssh/id_ed25519`, with a FIFO
+that never returns a byte, or with a file that grew to a gigabyte since the last
+scan. Quickshell's `FileView` — which the read path used until v0.1.1 — exposes
+no open flags, no file-type check and no size cap, so none of those could be
+closed at that layer.
+
+Reads therefore go through the command path, in two steps (`core/ReadPolicy.js`):
+
+| Step | Command | What it settles |
+|---|---|---|
+| 1 | `stat -c '%F\|%s' -- <path>` | Type and size. No `-L`, so a symlink reports as a symlink rather than as its target. A non-regular or oversized path is refused before a byte is read. |
+| 2 | `dd if=<path> iflag=nofollow,nonblock,fullblock,count_bytes bs=65536 count=262145 status=none` | The read itself. `O_NOFOLLOW`, `O_NONBLOCK`, and a byte ceiling — enforced by the kernel and by the reader, not by trusting step 1. |
+
+Step 1 is the diagnosis: it produces the sentence the user reads ("path is a
+symbolic link, not a regular file"). Step 2 is the enforcement: if the path is
+swapped between the two steps, `O_NOFOLLOW` fails the open with `ELOOP` rather
+than following the link, and `O_NONBLOCK` means a substituted FIFO cannot hang
+the scan. Neither step is sufficient alone, which is why both are there — there
+is no window in which a swapped-in symlink is followed, because the refusal
+happens inside the syscall.
+
+The ceiling is 256 KiB, the same bound `CommandJob` puts on stdout. The read
+asks for one byte past it, so "this file is too big" is observed rather than
+inferred from a length that happened to land on the limit; a file that grew
+after being measured is refused rather than half-parsed.
+
+`dd` and `stat` are coreutils, alongside the `df` and `sha256sum` the plugin
+already requires. Nothing is bundled and no interpreter is involved.
+
+- Enforced in `core/ReadPolicy.js` (the policy and the argv) and
+  `core/FileReader.qml` (the sequencing).
+- Guarded by `scripts/check`: `FileView` may now only be instantiated in
+  `core/FileWriteJob.qml`, the read command may only be built in
+  `core/ReadPolicy.js`, and the open flags themselves are asserted.
+- Specified by `tests/tst_ReadPolicy.qml`.
+
+This invariant exists because the marketplace security review for the v0.1.0
+submission found the earlier `FileView.text()` read unbounded and
+un-type-checked. See [ADR-006](adr/ADR-006-reads-go-through-the-command-path.md).
 
 ### 6. Bounded work — CWE-770
 
@@ -139,6 +185,7 @@ repainting, so every axis is capped:
 |---|---|---|
 | stdout per command | 256 KiB, enforced while the stream arrives | `CommandJob` |
 | stderr per command | 64 KiB | `CommandJob` |
+| Bytes per file read | 256 KiB, refused at `stat` and again by `dd`'s byte count | `ReadPolicy` |
 | Command lifetime | per-command timeout, then SIGTERM → SIGKILL → abandon | `CommandJob` |
 | Check lifetime | per-check watchdog beyond the command budget | `CheckEngine` |
 | Scan lifetime | 120 s ceiling; the scan then reports itself incomplete | `CheckEngine` |
@@ -241,11 +288,14 @@ read directly. The IPC surface adds convenience, not privilege.
 Stated plainly, because a security document that lists only solved problems is
 not describing reality.
 
-- **Symlinks are not resolved.** There is no `realpath` available to QML, so an
-  attacker who can already plant a symlink inside an allowlisted directory can
-  redirect a read. Bounded by the fact that every read is inert — content only
-  ever becomes evidence text — and by the allowlist being three directories the
-  user owns.
+- **Paths are not canonicalized.** There is still no `realpath` available to
+  QML, so the allowlist match is on the path as written. What that no longer
+  buys an attacker is the read itself: a symlink at an allowlisted path is
+  refused by `stat` and, if it appears after that, by `O_NOFOLLOW` at the open
+  (invariant 5a). A symlink in a *parent* directory of an allowlisted path is
+  still followed — closing that would need canonicalization QML cannot do, and
+  it requires write access to `~/.config/omarchy` or `~/.local/state`, which is
+  already enough to change what the plugin reads by simply editing the file.
 - **`PATH` is inherited.** Binaries are resolved through the session's `PATH`
   rather than pinned to absolute paths. This is deliberate: a diagnostic tool
   must report on the installation the user actually has, including one placed
@@ -265,14 +315,17 @@ not describing reality.
 
 The questions worth asking, in order:
 
-1. Does it introduce a `Process` or `FileView` outside the two permitted files?
+1. Does it introduce a `Process` outside `core/CommandJob.qml`, or a `FileView`
+   outside `core/FileWriteJob.qml`?
 2. Does any argv element come from command output, a file, or a directory
    listing? If so, is it declared in `dataArgs` with the right `allowedRoots`?
 3. Does it widen `FileReader.allowedPrefixes`, and does it need to?
-4. Can it produce unbounded output, an unbounded loop, or an unbounded number
+4. Does it read a file any way other than through `FileReader` — that is,
+   without the no-follow open, the type check and the byte ceiling?
+5. Can it produce unbounded output, an unbounded loop, or an unbounded number
    of commands?
-5. Does every new failure path end in a check result?
-6. Does anything new reach the report, and is it sanitized?
+6. Does every new failure path end in a check result?
+7. Does anything new reach the report, and is it sanitized?
 
 `scripts/check` answers 1 mechanically and part of 4. The rest need eyes.
 

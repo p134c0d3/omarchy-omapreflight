@@ -57,11 +57,19 @@ Item {
   property Core.CommandRunner runner: Core.CommandRunner {}
 
   property Core.FileReader fileReader: Core.FileReader {
+    // Reads share the command runner: a read is a bounded, no-follow `stat` and
+    // `dd` pair rather than a second I/O path with its own rules.
+    runner: root.runner
+
     // The complete set of directories OmaPreflight will read from. There is no
     // recursive mode and no way for a check to widen this (§24, §33.6).
+    //
+    // The Hyprland config directory is deliberately absent: those files are
+    // only ever *measured* — `stat` and `sha256sum`, size and hash, never
+    // contents (§17.3) — so granting read access to them would widen the
+    // allowlist past anything the catalog actually needs.
     allowedPrefixes: [
       root.configHome + "/omarchy/",
-      root.configHome + "/hypr/",
       root.stateDir + "/"
     ]
   }
