@@ -160,6 +160,7 @@ var THIRD_PARTY_VALIDATION = {
 // actually happens.
 function _validateAll(ctx, done, pluginsDir, parsed, known, onDisk, listNote) {
   var notes = []
+  var incomplete = onDisk === null
   if (listNote.length > 0) notes.push(listNote)
 
   var unloaded = []
@@ -173,6 +174,7 @@ function _validateAll(ctx, done, pluginsDir, parsed, known, onDisk, listNote) {
         // Also where a directory name containing a newline ends up, since it
         // arrives here as fragments. Reported rather than silently dropped.
         unusable.push(name)
+        incomplete = true
         continue
       }
       unloaded.push(name)
@@ -187,6 +189,7 @@ function _validateAll(ctx, done, pluginsDir, parsed, known, onDisk, listNote) {
   for (var t = 0; t < listed.length; t++) targets.push(listed[t].id)
 
   if (targets.length > MAX_PLUGINS) {
+    incomplete = true
     notes.push("Only the first " + MAX_PLUGINS + " of " + targets.length
       + " plugin directories were validated, to stay inside the scan's time budget.")
     targets = targets.slice(0, MAX_PLUGINS)
@@ -198,6 +201,8 @@ function _validateAll(ctx, done, pluginsDir, parsed, known, onDisk, listNote) {
   _forEachSeries(targets, function (id, next) {
     var directory = PluginList.directoryFor(pluginsDir, id)
     if (directory === "") {
+      incomplete = true
+      notes.push("Not checked: unusable plugin id")
       next()
       return
     }
@@ -210,8 +215,11 @@ function _validateAll(ctx, done, pluginsDir, parsed, known, onDisk, listNote) {
     ctx.exec(["omarchy", "plugin", "validate", directory],
       { timeoutMs: 15000, dataArgs: [3], allowedRoots: [pluginsDir] },
       function (result) {
-        if (result.blocked) {
-          notes.push("Not checked: " + id + " (" + result.blockedReason + ")")
+        if (result.blocked || result.timedOut || result.cancelled || result.startFailed
+            || result.abandoned || result.stdoutTruncated || result.stderrTruncated) {
+          incomplete = true
+          notes.push("Not checked: " + id + " (" + (result.blockedReason
+            || "validation did not complete or its output was truncated") + ")")
           next()
           return
         }
@@ -247,8 +255,9 @@ function _validateAll(ctx, done, pluginsDir, parsed, known, onDisk, listNote) {
 
     if (failures.length === 0) {
       done({
-        status: R.STATUS.PASS,
-        summary: validated === 1
+        status: incomplete ? R.STATUS.UNKNOWN : R.STATUS.PASS,
+        summary: incomplete ? "Plugin validation is incomplete; " + validated + " directories validated cleanly."
+          : validated === 1
           ? "1 plugin directory validates cleanly."
           : validated + " plugin directories validate cleanly.",
         details: details

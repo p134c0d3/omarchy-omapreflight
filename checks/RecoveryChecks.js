@@ -150,10 +150,11 @@ var VERSION_BASELINE_MATCH = {
     }
 
     var comparison = store.compareTo(ctx.facts ? ctx.facts() : null)
-    if (!comparison.comparable) {
+    if (!comparison.comparable || !comparison.complete) {
       done({
         status: R.STATUS.UNKNOWN,
-        summary: "Could not compare against the baseline: " + comparison.reason + ".",
+        summary: "Baseline comparison is incomplete: " + comparison.reason + ".",
+        details: comparison.changes.map(Baseline.describeChange),
         material: false
       })
       return

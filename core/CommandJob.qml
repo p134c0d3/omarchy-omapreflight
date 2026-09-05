@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell.Io
+import "CommandResult.js" as CommandResult
 
 // A single external command execution, start to guaranteed terminal state.
 //
@@ -198,7 +199,7 @@ QtObject {
   // The normalized shape every caller sees (spec §13). `ok` is the only
   // question most callers actually have.
   function result() {
-    return {
+    return CommandResult.finish({
       command: Array.isArray(argv) ? argv.slice() : [],
       exitCode: _exitCode,
       stdout: _stdoutText,
@@ -211,8 +212,7 @@ QtObject {
       blockedReason: "",
       stdoutTruncated: _stdoutTruncated,
       stderrTruncated: _stderrTruncated,
-      durationMs: _startedAtMs > 0 ? Math.max(0, Math.round(Date.now() - _startedAtMs)) : 0,
-      ok: !_timedOut && !_cancelled && !_startFailed && !_abandoned && _exitCode === 0
-    }
+      durationMs: _startedAtMs > 0 ? Math.max(0, Math.round(Date.now() - _startedAtMs)) : 0
+    })
   }
 }

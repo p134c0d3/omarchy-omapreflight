@@ -96,6 +96,13 @@ TestCase {
     compare(R.aggregateReadiness([result("a", "pass"), result("b", "warn")], true), "review")
   }
 
+  function test_informational_warning_does_not_change_readiness() {
+    compare(R.aggregateReadiness([result("local-edits", "warn", "warning", false)], true), "ready")
+    // Materiality must never suppress a proven failure or blocker.
+    compare(R.aggregateReadiness([result("failure", "fail", "error", false)], true), "review")
+    compare(R.aggregateReadiness([result("blocker", "fail", "blocker", false)], true), "not_recommended")
+  }
+
   function test_non_blocking_failure_is_review() {
     compare(R.aggregateReadiness([result("a", "fail", "error")], true), "review")
   }

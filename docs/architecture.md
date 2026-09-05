@@ -125,6 +125,9 @@ summary, details, evidence. **Facts** are structured values recorded through
 
 The baseline is built from facts, never from results. Deriving machine-readable
 state by parsing summary text works right up until someone improves a sentence.
+Saving requires the current scan to have completed. `Baseline.capture()` copies
+its facts before asynchronous directory creation, so a new scan cannot replace
+the state being saved. Cancelled scans cannot overwrite the baseline.
 
 ## Surfaces
 

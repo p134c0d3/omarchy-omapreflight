@@ -17,10 +17,12 @@ Twenty-one checks across six categories. Every one of them is a read.
 | `UNKNOWN` | The check ran and could not establish the answer. Not a pass. |
 | `SKIPPED` | The check does not apply here — usually a missing capability. Never affects readiness. |
 
-A check is **material** if an `UNKNOWN` from it should pull readiness down to
+A check is **material** if a `WARN` or `UNKNOWN` from it should pull readiness down to
 REVIEW. Informational checks are not material: failing to read the Quickshell
 version is not a reason to hesitate before updating, and treating it as one
 would train people to ignore the verdict.
+`FAIL` always affects readiness, even for an informational check; a blocker
+failure always produces NOT RECOMMENDED. See [ADR-007](adr/ADR-007-informational-warnings.md).
 
 ---
 
@@ -151,6 +153,10 @@ Two distinct failures, both reported as `FAIL`:
 
 One broken plugin never stops the rest. Directory names that are not usable
 plugin ids are reported as ignored rather than silently skipped.
+If directory listing fails, the plugin cap is reached, a name is unusable, or
+a validation command cannot complete, the result is `UNKNOWN` unless another
+plugin has a confirmed validation failure (`FAIL`). Partial coverage never
+produces `PASS`.
 *Runs:* `find <plugins> -mindepth 1 -maxdepth 1 -type d -printf '%f\n'` — a
 single level, bounded in the argv itself — then `omarchy plugin validate <dir>`
 per plugin, 15 s each.
@@ -227,6 +233,9 @@ not warned about. Moving *backward* is `WARN` — that usually means a rollback,
 and it changes what the rest of the report means. When the two versions cannot
 be meaningfully ordered, the result says so rather than guessing.
 `SKIPPED` when there is no baseline. Not material.
+Missing versions, inventories, file hashes, or previously recorded git revisions
+produce an incomplete comparison (`UNKNOWN`). Confirmed changes still appear
+in the details. “Nothing has changed” requires complete comparison evidence.
 
 ---
 

@@ -16,6 +16,46 @@ import "../core/Baseline.js" as Baseline
 TestCase {
   name: "Baseline"
 
+  function test_capture_requires_current_completed_scan() {
+    compare(Baseline.capture({ scanId: "", lastCompletedScanId: "" }, {}).ok, false)
+    compare(Baseline.capture({ scanId: "new", lastCompletedScanId: "old" }, {}).ok, false)
+    compare(Baseline.capture({ scanId: "same", lastCompletedScanId: "same", scanRunning: true }, {}).ok, false)
+    compare(Baseline.capture({ scanId: "same", lastCompletedScanId: "same", scanRunning: false }, {}).ok, true)
+  }
+
+  function test_capture_survives_scan_started_during_directory_creation() {
+    var current = { omarchy: { version: "4.0.1" } }
+    var capture = Baseline.capture({ scanId: "one", lastCompletedScanId: "one" }, current)
+    current.omarchy.version = "4.0.2"
+    compare(capture.facts.omarchy.version, "4.0.1")
+  }
+
+  function test_missing_evidence_is_an_incomplete_comparison() {
+    var baseline = Baseline.build(facts, "0.1.1", "now")
+    var empty = Baseline.compare(baseline, {})
+    compare(empty.comparable, false)
+    compare(empty.complete, false)
+    var partial = JSON.parse(JSON.stringify(facts))
+    delete partial.quickshell
+    var comparison = Baseline.compare(baseline, partial)
+    compare(comparison.comparable, true)
+    compare(comparison.complete, false)
+    verify(comparison.reason.indexOf("Quickshell version") >= 0)
+    compare(comparison.changes.length, 0)
+    compare(Baseline.compare(baseline, facts).complete, true)
+  }
+
+  function test_missing_hash_and_git_head_disclose_partial_comparison() {
+    var baseline = Baseline.build(facts, "0.1.1", "now")
+    var partial = JSON.parse(JSON.stringify(facts))
+    partial.hyprland.files[0].sha256 = ""
+    delete partial.plugins.gitState["b.okomart"]
+    var comparison = Baseline.compare(baseline, partial)
+    compare(comparison.complete, false)
+    verify(comparison.reason.indexOf("hash") >= 0)
+    verify(comparison.reason.indexOf("git revision") >= 0)
+  }
+
   property var facts: ({
     omarchy: { version: "4.0.1-1", channel: "stable" },
     quickshell: { version: "0.3.1-1" },

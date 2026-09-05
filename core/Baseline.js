@@ -13,6 +13,16 @@
 
 var SCHEMA_VERSION = 1
 
+// Capture before any asynchronous directory creation or write. A later scan
+// must not change the facts the user chose to record.
+function capture(store, facts) {
+  if (!store || store.scanRunning || !store.scanId
+      || store.lastCompletedScanId !== store.scanId) {
+    return { ok: false, error: "complete the current scan before recording a baseline" }
+  }
+  return { ok: true, facts: JSON.parse(JSON.stringify(facts || {})) }
+}
+
 // Spec §19. Metadata only — no file contents, ever.
 function build(facts, pluginVersion, createdAt) {
   var f = facts || {}
@@ -137,22 +147,25 @@ function compare(baseline, facts) {
   if (!baseline) return { comparable: false, reason: "no baseline", changes: [] }
   var f = facts || {}
   var changes = []
+  var coverage = { compared: 0, missing: [] }
 
   _compareValue(changes, "Omarchy version",
-    _at(baseline, ["omarchy", "version"]), _at(f, ["omarchy", "version"]))
+    _at(baseline, ["omarchy", "version"]), _at(f, ["omarchy", "version"]), coverage)
   _compareValue(changes, "Release channel",
-    _at(baseline, ["omarchy", "channel"]), _at(f, ["omarchy", "channel"]))
+    _at(baseline, ["omarchy", "channel"]), _at(f, ["omarchy", "channel"]), coverage)
   _compareValue(changes, "Quickshell version",
-    _at(baseline, ["quickshell", "version"]), _at(f, ["quickshell", "version"]))
+    _at(baseline, ["quickshell", "version"]), _at(f, ["quickshell", "version"]), coverage)
   _compareValue(changes, "Hyprland version",
-    _at(baseline, ["hyprland", "version"]), _at(f, ["hyprland", "version"]))
+    _at(baseline, ["hyprland", "version"]), _at(f, ["hyprland", "version"]), coverage)
   _compareValue(changes, "shell.json",
-    _at(baseline, ["shell", "configFingerprint"]), _at(f, ["shell", "configFingerprint"]))
+    _at(baseline, ["shell", "configFingerprint"]), _at(f, ["shell", "configFingerprint"]), coverage)
 
-  _compareFiles(changes, baseline.files, _at(f, ["hyprland", "files"]))
-  _comparePlugins(changes, baseline.plugins, f.plugins)
+  _compareFiles(changes, baseline.files, _at(f, ["hyprland", "files"]), coverage)
+  _comparePlugins(changes, baseline.plugins, f.plugins, coverage)
 
-  return { comparable: true, reason: "", changes: changes }
+  return { comparable: coverage.compared > 0, complete: coverage.missing.length === 0,
+    reason: coverage.missing.length ? "Missing comparison evidence: " + coverage.missing.join(", ") : "",
+    changes: changes }
 }
 
 function _at(object, pathSegments) {
@@ -166,16 +179,24 @@ function _at(object, pathSegments) {
 
 // A value missing on either side is "not comparable", not "changed". Reporting
 // a change because a check was skipped this time would be a lie by omission.
-function _compareValue(changes, label, before, after) {
+function _compareValue(changes, label, before, after, coverage) {
   var a = before === undefined || before === null ? "" : String(before)
   var b = after === undefined || after === null ? "" : String(after)
-  if (a.length === 0 || b.length === 0) return
+  if (a.length === 0 || b.length === 0) {
+    coverage.missing.push(label)
+    return
+  }
+  coverage.compared++
   if (a === b) return
   changes.push({ kind: "value", label: label, before: a, after: b })
 }
 
-function _compareFiles(changes, before, after) {
-  if (!Array.isArray(before) || !Array.isArray(after)) return
+function _compareFiles(changes, before, after, coverage) {
+  if (!Array.isArray(before) || !Array.isArray(after)) {
+    coverage.missing.push("config file inventory")
+    return
+  }
+  coverage.compared++
 
   var baselineByPath = {}
   for (var i = 0; i < before.length; i++) {
@@ -192,6 +213,7 @@ function _compareFiles(changes, before, after) {
       changes.push({ kind: "file-added", label: current.path })
       continue
     }
+    if (!previous.sha256 || !current.sha256) coverage.missing.push(current.path + " hash")
     if (previous.sha256 && current.sha256 && previous.sha256 !== current.sha256) {
       changes.push({ kind: "file-changed", label: current.path,
                      before: previous.sha256, after: current.sha256 })
@@ -203,10 +225,13 @@ function _compareFiles(changes, before, after) {
   }
 }
 
-function _comparePlugins(changes, before, after) {
-  if (!Array.isArray(before)) return
+function _comparePlugins(changes, before, after, coverage) {
   var inventory = after && Array.isArray(after.thirdParty) ? after.thirdParty : null
-  if (!inventory) return
+  if (!Array.isArray(before) || !inventory) {
+    coverage.missing.push("plugin inventory")
+    return
+  }
+  coverage.compared++
 
   var baselineById = {}
   for (var i = 0; i < before.length; i++) {
@@ -228,6 +253,7 @@ function _comparePlugins(changes, before, after) {
     }
 
     var head = gitState[entry.id] ? String(gitState[entry.id].gitHead || "") : ""
+    if (previous.gitHead && !head) coverage.missing.push(entry.id + " git revision")
     if (previous.gitHead && head && previous.gitHead !== head) {
       changes.push({ kind: "plugin-updated", label: entry.id,
                      before: previous.gitHead.substring(0, 7),

@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import "core" as Core
 import "core/Sanitizer.js" as Sanitizer
+import "core/Baseline.js" as Baseline
 import "checks/Registry.js" as Registry
 
 // OmaPreflight service — the single long-lived object the shell mounts for this
@@ -173,13 +174,14 @@ Item {
   // wrong moment — mid-update, or with a broken config — is worse than no
   // baseline at all.
   function saveBaseline(callback) {
-    if (!store.lastCompletedScanId || store.lastCompletedScanId.length === 0) {
-      if (callback) callback({ ok: false, error: "run a scan first" })
+    var capture = Baseline.capture(store, root.engine.facts)
+    if (!capture.ok) {
+      if (callback) callback(capture)
       return ""
     }
 
     ensureStateDirs(function () {
-      root.baselineStore.save(root.engine.facts, function (result) {
+      root.baselineStore.save(capture.facts, function (result) {
         if (!result.ok) root.log("baseline write failed: " + result.error)
         if (callback) callback(result)
       })

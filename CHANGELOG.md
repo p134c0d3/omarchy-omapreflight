@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Baseline saving requires the current scan to have completed and captures its
+  facts before asynchronous writes; cancelled or subsequent scans cannot supply
+  the saved facts.
+- Baseline comparisons report missing evidence as UNKNOWN and preserve any
+  confirmed changes in their details.
+- Incomplete plugin validation reports UNKNOWN, including capped inventories,
+  unreadable directories, unusable names, and interrupted commands. Confirmed
+  invalid plugins still produce FAIL.
+- Truncated command output is unsuccessful even when the process exits zero,
+  with an explicit capture-limit diagnostic.
+- Informational warnings remain visible without changing readiness. Proven
+  failures still affect readiness regardless of materiality (ADR-007).
+
 ## [0.1.1] — 2026-08-26
 
 A security fix from the marketplace review of the 0.1.0 submission

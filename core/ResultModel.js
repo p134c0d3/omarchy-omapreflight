@@ -122,7 +122,7 @@ function makeResult(def, fields) {
     details: Array.isArray(f.details) ? f.details.map(String) : [],
     evidence: Array.isArray(f.evidence) ? f.evidence.slice() : [],
     remediation: f.remediation === undefined ? null : f.remediation,
-    // Whether an UNKNOWN from this check should pull readiness down to REVIEW.
+    // Whether a WARN or UNKNOWN should pull readiness down to REVIEW.
     // A missing optional capability is not material (§16); an unreadable
     // Omarchy version is.
     material: f.material === undefined
@@ -202,9 +202,8 @@ function countBlockers(results) {
   return total
 }
 
-// Spec §16, verbatim, with the one clarification the spec asks for: a
-// non-material UNKNOWN (an optional capability that is simply absent) does not
-// drag readiness to REVIEW, and SKIPPED never does.
+// Informational WARN and UNKNOWN findings remain visible without changing
+// readiness (ADR-007). FAIL always affects readiness; SKIPPED never does.
 //
 // There is no numeric score here and there must never be one (§3.1).
 function aggregateReadiness(results, scanCompleted) {
@@ -223,7 +222,8 @@ function aggregateReadiness(results, scanCompleted) {
     var severity = normalizeSeverity(r.severity)
 
     if (status === STATUS.FAIL && severity === SEVERITY.BLOCKER) blocking = true
-    if (status === STATUS.FAIL || status === STATUS.WARN) needsReview = true
+    if (status === STATUS.FAIL) needsReview = true
+    if (status === STATUS.WARN && r.material !== false) needsReview = true
     if (status === STATUS.UNKNOWN && r.material !== false) needsReview = true
   }
 
