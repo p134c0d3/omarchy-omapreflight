@@ -223,6 +223,29 @@ Item {
     return JSON.stringify(store.results)
   }
 
+  // One IPC response captures a completed scan's checklist and facts together.
+  // The update gate must never combine status from one scan with another's
+  // results, or accept an old READY while a new scan is running.
+  function updateSnapshot(expectedScanId) {
+    if (!expectedScanId || store.scanRunning || store.scanId !== expectedScanId
+        || store.lastCompletedScanId !== expectedScanId) {
+      return JSON.stringify({ ok: false, error: "the requested scan has not completed" })
+    }
+    return JSON.stringify({
+      ok: true,
+      schemaVersion: 1,
+      scanId: store.scanId,
+      completedAt: store.lastScanAt,
+      pluginVersion: root.pluginVersion,
+      readiness: store.readiness,
+      checkCount: root.engine.checks.length,
+      results: store.results.map(function (result) {
+        return Sanitizer.sanitizeResult(result, root.reportBuilder.sanitizeContext)
+      }),
+      baseline: Baseline.build(store.environment, root.pluginVersion, store.lastScanAt)
+    })
+  }
+
   // ---- window rule -----------------------------------------------------
   //
   // The diagnostic surface is a real toplevel (ADR-005), which is what makes
@@ -333,6 +356,14 @@ Item {
 
     function results(): string {
       return root.resultsJson()
+    }
+
+    function updateSnapshot(scanId: string): string {
+      return root.updateSnapshot(scanId)
+    }
+
+    function cancelScan(scanId: string): string {
+      return root.store.scanId === scanId ? root.cancelPreflight() : "different-scan"
     }
 
     // Writes a sanitized Markdown report into the state directory and returns

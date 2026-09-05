@@ -30,6 +30,13 @@ on:
 - wedging or crashing `omarchy-shell`, including through unbounded output,
   unbounded runtime, or a scan that never terminates.
 
+The optional terminal companion is also in scope, including unintended updater
+launches, continuation after an unapproved checklist, and unsafe state-file or
+IPC handling. Its documented handoff to Omarchy on an explicit
+`omapreflight update` invocation is intentional; Omarchy's subsequent network
+and privilege operations belong to the updater. See
+[the integration boundary](docs/adr/ADR-008-optional-update-gate.md).
+
 Out of scope:
 
 - weaknesses in Omarchy, Quickshell, Hyprland, or any tool OmaPreflight queries

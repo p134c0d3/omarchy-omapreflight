@@ -34,6 +34,12 @@ does not make the claim.
 
 ## Trust boundaries
 
+The optional terminal companion adds an explicit update entry point outside
+the diagnostic service. Its IPC, state, native update lock, and final updater
+handoff are specified in [ADR-008](adr/ADR-008-optional-update-gate.md).
+The invariants below describe the QML diagnostic service; the companion never
+runs package commands itself and delegates updates only on an explicit invocation.
+
 Four kinds of input cross into the plugin. Each is treated as untrusted.
 
 | Source | Why it is untrusted | Handled by |
@@ -41,7 +47,7 @@ Four kinds of input cross into the plugin. Each is treated as untrusted.
 | **Command output** — `omarchy`, `hyprctl`, `pacman`, `systemctl`, `df`, `git` | Another program's stdout is data, and a future version can change its shape without warning | `parsers/*.js`, all parsing behind `parsers/Json.js` |
 | **File contents** — `shell.json`, the plugin's own baseline | User-editable, and may be malformed, mid-write, or not a regular file at all | `core/FileReader.qml` + `core/ReadPolicy.js` + parsers |
 | **Names and paths from disk** — plugin ids, plugin directories | Anyone who can create a directory chooses its name | `core/CommandRunner.qml` data-argument rules |
-| **IPC calls** — `omarchy-shell p134c0d3.omapreflight …` | Any process running as the user can call it | `Service.qml` — the surface is read-only and takes no arguments |
+| **IPC calls** — `omarchy-shell p134c0d3.omapreflight …` | Any process running as the user can call it | `Service.qml` — fixed scan/report/baseline actions; optional scan IDs are compared as data and never executed |
 
 The plugin's *own* source, its check definitions, and the literal argv it
 builds are trusted. That is the line: anything OmaPreflight wrote is trusted,

@@ -17,6 +17,27 @@ Last verified: **2026-08-24**
 
 ## Runtime facts that shaped the design
 
+### Terminal update gate verification — 2026-09-04
+
+The companion was tested on Omarchy `4.0.2-1`, Quickshell `0.3.1-1`, and
+Hyprland `0.56.2`. The earlier table records the original architecture spike;
+these are the later integration observations:
+
+- The installed updater has no pre-update hook. Its post-update hook precedes
+  the AUR stage and cannot stand in for a final postflight.
+- The unified CLI resolves its updater by absolute path.
+- The native lock is `${XDG_RUNTIME_DIR:-/tmp}/omarchy-update.lock`, with its FD
+  carried in `OMARCHY_UPDATE_LOCK_FD`. The installed updater recognizes the FD
+  inherited from the companion, and the transcript launcher preserves it.
+- The live service returned all 21 checks in a scan-specific snapshot and
+  refused stale snapshot/cancellation IDs. Unattended REVIEW stopped; accepting
+  REVIEW in test-only mode wrote the private pre-update record.
+- Updater handoff was tested with a fake updater. No actual package update was
+  performed during verification.
+
+See [the usage guide](update-integration.md) and
+[ADR-008](adr/ADR-008-optional-update-gate.md).
+
 ### Tooling is not on `PATH`
 
 `qmllint` and `qmltestrunner` ship with `qt6-declarative` but live in

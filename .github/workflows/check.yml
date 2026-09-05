@@ -29,10 +29,9 @@ jobs:
         run: ./scripts/check --portable
 
   tests:
-    # The suite is pure JavaScript by design — everything worth testing lives in
-    # a `.js` module precisely because qmltestrunner cannot load Quickshell's
-    # C++ QML plugin outside a shell process. That makes it runnable on a plain
-    # Ubuntu runner with nothing but Qt's QML tooling.
+    # Diagnostic tests use pure JS through Qt's QML runner; companion tests use
+    # Python's standard library and fake IPC/updaters. Neither needs a running
+    # Omarchy/Quickshell session, and neither runs a real system update.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

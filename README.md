@@ -1,6 +1,6 @@
 # OmaPreflight
 
-**Know what an update will break — before you run it.**
+**Check your system before updating. See what changed afterwards.**
 
 OmaPreflight is an Omarchy-aware change-intelligence plugin. It establishes a
 known-good picture of your system before a change, detects high-confidence
@@ -20,6 +20,10 @@ so it will look like whatever theme you have applied.*
 > plugins, runtime and recovery; sanitized reports; baselines. Verified on
 > Omarchy 4.0.1 / Quickshell 0.3.1 / Hyprland 0.56.2. See the
 > [changelog](CHANGELOG.md) for what is in it and what is deliberately not.
+
+The `main` branch also includes the optional [pre-update checklist](#optional-pre-update-checklist),
+verified on Omarchy 4.0.2. It is off by default and uses a dedicated terminal
+command; it does not intercept Omarchy's existing update commands or button.
 
 ## Design principles
 
@@ -99,6 +103,12 @@ rm -rf ~/.local/state/omapreflight    # baseline and saved reports
 and the Hyprland window rule for its own report window, which is registered at
 runtime and disappears on its own the next time the compositor restarts.
 
+If you installed the optional terminal companion, remove its launcher too:
+
+```bash
+rm ~/.local/bin/omapreflight
+```
+
 ## Use
 
 - **Click the bar widget** for the quick panel: current readiness, what needs
@@ -119,6 +129,59 @@ shortcut:
 ```lua
 o.bind("SUPER, P", "OmaPreflight", "omarchy-shell shell toggle p134c0d3.omapreflight")
 ```
+
+## Optional pre-update checklist
+
+The terminal companion can run the full checklist before handing off to the
+normal Omarchy updater. It requires Python 3; scanning also requires the
+OmaPreflight plugin enabled in the running shell. Auto-run is **off by default**.
+
+Install the companion command once, after installing/updating the plugin:
+
+```bash
+mkdir -p ~/.local/bin
+ln -s "$HOME/.config/omarchy/plugins/p134c0d3.omapreflight/scripts/omapreflight" "$HOME/.local/bin/omapreflight"
+```
+
+Do not overwrite an existing command with the same name. Alternatively, run
+`scripts/omapreflight` directly from this checkout.
+
+```bash
+omarchy plugin enable p134c0d3.omapreflight   # if the plugin is currently disabled
+omapreflight auto-run enable
+omapreflight pre-update         # test the checklist without launching an update
+omapreflight update
+
+omapreflight auto-run disable
+omapreflight update              # straight to Omarchy; no preflight or IPC
+omapreflight auto-run status
+```
+
+When enabled, the command acquires Omarchy's update lock, starts a fresh scan,
+and prints every check. READY continues automatically. REVIEW asks whether to
+continue, with “no” as the default. NOT RECOMMENDED and incomplete scans stop.
+`omapreflight update -y` never prompts in preflight: REVIEW stops the command.
+Informational warnings remain visible without blocking READY.
+
+Before continuing, it saves the sanitized checklist and metadata baseline to
+`${XDG_STATE_HOME:-~/.local/state}/omapreflight/pre-update.json`, separately from
+your manual baseline. Failure to save stops the update. This is a pre-update
+record, not proof that an update started or completed. Automatic postflight is
+not implemented yet.
+
+**Scope:** this version applies to `omapreflight update`. Ordinary
+`omarchy update` and Omarchy's own update button remain unchanged. The installed
+Omarchy has no native pre-update hook; no command overrides or system-package
+changes are installed. `omapreflight pre-update` runs just the optional gate
+without launching an update, which is useful for testing.
+
+The checklist diagnoses the current system. It does not fetch pending package
+versions, test candidate packages, or promise that future versions are compatible.
+After the gate, Omarchy performs its normal update, including its own confirmation,
+network access, snapshots, package handling, migrations, and restart decisions.
+
+See the [usage and troubleshooting guide](docs/update-integration.md) and
+[integration decision](docs/adr/ADR-008-optional-update-gate.md).
 
 ## IPC
 
@@ -152,8 +215,11 @@ hl.bind({ mods = "SUPER", key = "P", dispatcher = "exec",
           arg = "omarchy-shell p134c0d3.omapreflight togglePanel" })
 ```
 
-The IPC surface is deliberately small. It runs no arbitrary commands, takes no
-arguments, and returns only what a scan already collected.
+The IPC surface is deliberately small. It runs no arbitrary commands and
+returns only what a scan already collected. The companion additionally uses
+`updateSnapshot <scan-id>` for an atomic completed checklist/baseline response
+and `cancelScan <scan-id>` to cancel only its own scan. These IDs are compared
+as data and never become executable commands.
 
 ## Theming
 
@@ -190,6 +256,13 @@ of floating. The reasoning is in
 ## What it does on your machine
 
 Stated plainly, because you are running it unsandboxed:
+
+The table describes the diagnostic plugin. The optional terminal companion
+also reads `update-settings.json`, writes that preference and `pre-update.json`
+inside its state directory, and opens Omarchy's native
+`${XDG_RUNTIME_DIR:-/tmp}/omarchy-update.lock`. An explicit
+`omapreflight update` invocation hands off to the normal updater after the gate;
+Omarchy then owns its usual network, package, and privilege operations.
 
 | Behaviour | Detail |
 |---|---|
@@ -234,6 +307,7 @@ from, and what reaches disk.
 | | |
 |---|---|
 | [Check catalog](docs/check-catalog.md) | All 21 checks, what each one runs, and what every outcome means |
+| [Update integration](docs/update-integration.md) | Optional auto-run, checklist decisions, state files, and troubleshooting |
 | [Privacy](docs/privacy.md) | Every value collected, its source, and what reaches disk |
 | [Security model](docs/security.md) | Trust boundaries, enforced invariants, and the residual risks |
 | [Architecture](docs/architecture.md) | How it fits together, and how to add a check |
@@ -246,6 +320,7 @@ from, and what reaches disk.
 ```bash
 scripts/check              # manifest validation + qmllint + security invariants
 scripts/check --portable   # the subset that runs without Omarchy; this is CI
+QT_QPA_PLATFORM=offscreen scripts/test  # Python companion tests + QML/JS tests
 scripts/dev-install        # deploy to ~/.config/omarchy/plugins, restart the shell
 ```
 

@@ -11,7 +11,9 @@ no remote is contacted.
 ## What it collects, and where each thing comes from
 
 Everything below stays in memory during a scan, and reaches disk only if you
-record a baseline or save a report.
+record a baseline, save a report, or enable the optional terminal pre-update
+gate. That gate saves an accepted scan's sanitized checklist and metadata
+baseline as `pre-update.json`. Its preference lives in `update-settings.json`.
 
 | Collected | Source |
 |---|---|
@@ -50,8 +52,8 @@ Not "does not currently" — there is no code path that could:
 
 ## What reaches disk
 
-Two files, both under `${XDG_STATE_HOME:-~/.local/state}/omapreflight/`, in a
-directory created with mode `0700`:
+Diagnostic state lives under `${XDG_STATE_HOME:-~/.local/state}/omapreflight/`,
+in a directory created with mode `0700`:
 
 **`baseline.json`** — written only when you ask for it (`B` in the report
 window, or the IPC `baseline` method). Metadata only: versions, fingerprints,
@@ -63,9 +65,22 @@ of every caller remembering.
 `report` method). Sanitized, and stamped with a line telling you to review it
 before posting.
 
-Nothing else is written. Not into the plugin checkout, not into your Omarchy or
-Hyprland configuration, not anywhere under `/usr/share/omarchy`. No
-configuration file is ever modified.
+**`update-settings.json`** — written when you enable or disable the optional
+terminal auto-run feature. Contains only its schema version and enabled flag.
+
+**`pre-update.json`** — written when an enabled pre-update gate is accepted,
+before handing off to Omarchy. Contains the sanitized checklist, scan metadata,
+and a metadata baseline. Replaces the previous pre-update record and leaves
+`baseline.json` unchanged. `omapreflight pre-update` can also write this file
+without launching an update; its presence does not establish that an update ran.
+Both companion files are written atomically with mode `0600`.
+
+The companion also opens `${XDG_RUNTIME_DIR:-/tmp}/omarchy-update.lock`, using
+Omarchy's existing lock contract. It stores no diagnostic data there and leaves
+the lock file in place after releasing it. No plugin checkout, Omarchy/Hyprland
+configuration, or file under `/usr/share/omarchy` is modified by the companion.
+The optional launcher symlink in `~/.local/bin` is created by the installation
+command you run, not by the diagnostic service.
 
 ## Sanitization
 
@@ -96,8 +111,9 @@ has no authentication — any process running as you can call it, including
 
 The mitigation is scope rather than access control: everything those methods
 return is derived from commands and files the same process could run and read
-directly. The IPC surface adds convenience, not privilege. It takes no
-arguments and executes nothing arbitrary.
+directly. The IPC surface adds convenience, not privilege. The update companion
+uses scan IDs to request a matching completed snapshot or cancel its own scan;
+these values are compared as data and execute nothing arbitrary.
 
 ## The one thing that is not a read
 
@@ -120,5 +136,7 @@ cat core/ReadPolicy.js               # how a read is opened, and what it refuses
 scripts/check                        # fails if a network call or a shell appears
 ```
 
-The plugin is a few thousand lines of QML and JavaScript with no build step and
-no binaries. It is meant to be read.
+The plugin is QML and JavaScript with no build step or bundled binaries. The
+optional terminal companion is standard-library Python. It delegates an update
+only when invoked as `omapreflight update`; Omarchy then performs its normal
+network and package operations. The companion does not fetch anything itself.

@@ -5,3 +5,6 @@
 .DS_Store
 /reports/
 /checkpoints/
+# Python companion and test caches
+__pycache__/
+*.pyc

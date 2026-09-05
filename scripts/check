@@ -105,6 +105,40 @@ else
   fi
 fi
 
+# The optional terminal adapter has a separate, deliberately small Python
+# boundary. Parse it without generating bytecode, and guard against adding
+# shell evaluation or network clients to the local-only companion.
+note "Checking the terminal companion"
+if python3 - "$REPO_ROOT" <<'PY'
+import ast
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+for path in [root / "scripts/omapreflight", *sorted((root / "integration").glob("*.py"))]:
+    tree = ast.parse(path.read_text(), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in {"eval", "exec", "__import__"}:
+                raise SystemExit(f"Dynamic code in {path}:{node.lineno}")
+            for keyword in node.keywords:
+                if keyword.arg == "shell":
+                    raise SystemExit(f"Shell execution option in {path}:{node.lineno}")
+        imports = []
+        if isinstance(node, ast.Import):
+            imports = [entry.name for entry in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            imports = [node.module or ""]
+        if any(name.split('.')[0] in {"socket", "urllib", "http", "requests", "aiohttp", "ftplib"}
+               for name in imports):
+            raise SystemExit(f"Network import in {path}:{node.lineno}")
+PY
+then
+  pass "Python syntax; no shell execution option, dynamic code or network imports"
+else
+  fail "terminal companion validation"
+fi
+
 # ------------------------------------------------------------ safety grep
 # Cheap, high-signal guards for the invariants in docs/security.md and
 # ENGINEERING_SPEC §33. These catch an accidental regression long before a

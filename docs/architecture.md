@@ -47,7 +47,7 @@ per plugin id, which makes it the natural and correct home.
 
 Full reasoning: [ADR-001](adr/ADR-001-shared-state.md).
 
-### Logic that matters is pure JavaScript
+### Diagnostic decisions are pure JavaScript
 
 The readiness aggregator, every parser, the sanitizer, the execution policy and
 the baseline document are `.js` modules. The QML types are thin wrappers that
@@ -56,7 +56,7 @@ own I/O and lifecycle and delegate the thinking.
 This started as a preference and became a constraint: `qmltestrunner` cannot
 load Quickshell's C++ QML plugin outside a shell process, so anything living in
 a QML type that touches Quickshell is untestable. That pressure improved the
-design — 186 tests exist because the logic is somewhere they can reach it.
+design: the diagnostic decisions can be tested without starting the desktop.
 
 The division to keep: **QML does I/O and lifetime; JavaScript does decisions.**
 
@@ -129,6 +129,26 @@ Saving requires the current scan to have completed. `Baseline.capture()` copies
 its facts before asynchronous directory creation, so a new scan cannot replace
 the state being saved. Cancelled scans cannot overwrite the baseline.
 
+## Optional terminal update gate
+
+`scripts/omapreflight` loads the standard-library Python companion in
+`integration/update_gate.py`. It is an update entry point outside the QML
+service, with a persistent auto-run preference that defaults to off.
+
+When enabled, it holds Omarchy's native update lock, requests a fresh scan over
+IPC, and waits for that scan's completion. `updateSnapshot <scan-id>` returns
+the complete sanitized checklist and metadata baseline in one response, so the
+gate cannot combine an older readiness with newer results. `cancelScan <scan-id>`
+atomically limits cancellation to the caller's scan.
+
+The gate prints every check, applies its continuation policy, and atomically
+writes `pre-update.json` before replacing its own process with `omarchy update`.
+The inherited lock descriptor lets the updater retain the same lock. The
+updater owns all package operations and does not receive a diagnostic timeout.
+Disabled mode bypasses scanning and IPC. No native pre-hook or command override
+is installed. See [ADR-008](adr/ADR-008-optional-update-gate.md) for the boundary
+and [the usage guide](update-integration.md) for the public commands.
+
 ## Surfaces
 
 Both read the store and call the service. Neither runs a command.
@@ -178,8 +198,9 @@ See [ADR-004](adr/ADR-004-theming-and-layer-legibility.md).
 | `checks/*.js` | Check definitions. Pure; no I/O of their own. |
 | `parsers/*.js` | Text → data. Pure, defensive, never throw. |
 | `ui/` | Presentation components shared by both surfaces. |
-| `tests/` | 186 cases over the pure modules. |
-| `scripts/` | `check`, `test`, `dev-install`. |
+| `integration/update_gate.py` | Terminal gate, bounded IPC, preference/state files, update lock and handoff. |
+| `tests/` | QML/JS diagnostic tests and Python companion tests, including a fake-updater handoff. |
+| `scripts/` | `check`, `test`, `dev-install`, and the `omapreflight` entry point. |
 
 ## Things worth knowing before you edit
 

@@ -56,6 +56,13 @@ enforces the ones a machine can.
 
 ## Conventions
 
+The optional terminal companion follows `docs/adr/ADR-008-optional-update-gate.md`.
+Its bounded Python IPC adapter is separate from the QML command runner. It may
+write its own state and the native update lock, then delegate an explicitly
+requested update via argv to Omarchy. Never apply a diagnostic timeout to that
+updater. The plugin itself still performs no package operations, network
+requests, or privilege escalation.
+
 - Prefer the unified `omarchy <group> <action>` CLI over internal `omarchy-*`
   binaries; discover with `omarchy commands --json`.
 - Parsers and check definitions are **pure JS modules** in `parsers/` and

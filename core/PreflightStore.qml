@@ -60,6 +60,7 @@ QtObject {
       pluginVersion: pluginVersion,
       readiness: readiness,
       scanRunning: scanRunning,
+      scanId: scanId,
       lastScanAt: lastScanAt,
       lastCompletedScanId: lastCompletedScanId,
       counts: countsByStatus(),

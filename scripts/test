@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Run the pure-logic test suite.
+# Run the Python companion tests and QML/JavaScript diagnostic tests.
 #
-# Everything under tests/ exercises plain JavaScript modules — the readiness
+# The QML tests exercise plain JavaScript modules — the readiness
 # aggregator, the parsers, the sanitizer, and the execution policy. That is
 # deliberate: qmltestrunner cannot load Quickshell's C++ QML plugin outside a
 # shell process, so any logic worth testing lives in a `.js` module that the
-# QML types delegate to.
+# QML types delegate to. Python tests cover the optional terminal gate, using
+# fake IPC/updaters for process integration; they never run a system update.
 #
 # The QML types themselves are verified by running them: `scripts/dev-install`
 # and then exercising the plugin in the live shell.
@@ -21,4 +22,5 @@ if [[ ! -x "$QT_BIN/qmltestrunner" ]]; then
 fi
 
 cd "$REPO_ROOT"
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py'
 exec "$QT_BIN/qmltestrunner" -input tests/ "$@"

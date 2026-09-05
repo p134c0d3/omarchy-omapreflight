@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Optional `omapreflight update` terminal companion with persistent auto-run
+  enable/disable controls (off by default), a complete checklist, and native
+  Omarchy update handoff. READY continues, REVIEW requires interactive consent,
+  and blockers or incomplete scans stop. `-y` never approves REVIEW.
+- A sanitized pre-update checklist and metadata baseline saved separately from
+  the manual baseline, with scan-specific IPC and native update locking.
+  Ordinary Omarchy update commands/buttons remain unchanged; see ADR-008.
+
 ### Fixed
 
 - Baseline saving requires the current scan to have completed and captures its
